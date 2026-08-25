@@ -1,0 +1,2 @@
+episode_id,annotator_id,annotation_revision,motion_started,termination,designated_finger_contact,retreated_after_contact,wrong_finger_only_contact,visual_sufficiency,multimodal_conflict,expected_result,second_review_status,notes
+EVAL-v001-DEV-001,example-annotator,1,yes,completed,yes,yes,no,sufficient,no,succeeded,not_required,

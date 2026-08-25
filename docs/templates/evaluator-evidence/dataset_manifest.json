@@ -1,0 +1,30 @@
+{
+  "dataset_version": "evaluator-evidence-v001",
+  "created_at_utc": null,
+  "custodian": null,
+  "controlled_storage_location": null,
+  "planned_counts": {
+    "development": 25,
+    "acceptance": 30
+  },
+  "hardware": {
+    "g1_id": null,
+    "brainco_left_id": null,
+    "brainco_right_id": null,
+    "camera_ids": []
+  },
+  "configuration_sha256": {
+    "camera": null,
+    "calibration": null,
+    "time_sync": null,
+    "standard_start_state": null,
+    "control_entry_point": null,
+    "hardware_protection": null,
+    "capture_software": null,
+    "diagnostic_actions": null
+  },
+  "episode_manifest_sha256": null,
+  "development_labels_sha256": null,
+  "acceptance_labels_sha256": null,
+  "notes": null
+}
