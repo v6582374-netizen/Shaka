@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>黄色按钮三维目标恢复：决策原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #64717d;
+      --line: #d9e0e5;
+      --panel: #f7f9fa;
+      --accent: #b88400;
+      --accent-soft: #fff3c4;
+      --good: #16734a;
+      --warn: #9a5a00;
+      --bad: #a63a32;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--ink);
+      font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1120px, calc(100% - 40px)); margin: 42px auto 80px; }
+    h1, h2, h3 { line-height: 1.25; }
+    h1 { margin: 0 0 10px; font-size: clamp(28px, 4vw, 44px); letter-spacing: -0.03em; }
+    h2 { margin: 38px 0 14px; font-size: 24px; }
+    h3 { margin: 0 0 8px; font-size: 17px; }
+    p { margin: 0 0 12px; }
+    code { background: #eef2f4; padding: 2px 5px; border-radius: 4px; }
+    .lede { max-width: 850px; color: var(--muted); font-size: 18px; }
+    .notice {
+      margin: 24px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+    }
+    .grid { display: grid; gap: 16px; }
+    .evidence { grid-template-columns: repeat(3, 1fr); }
+    .workspace { grid-template-columns: minmax(0, 1.12fr) minmax(320px, .88fr); align-items: start; }
+    .card { border: 1px solid var(--line); border-radius: 10px; padding: 18px; background: #fff; }
+    .card.soft { background: var(--panel); }
+    .eyebrow { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+    .big { font-size: 24px; font-weight: 700; }
+    .status { display: inline-block; padding: 4px 9px; border-radius: 999px; font-weight: 700; font-size: 13px; }
+    .status.ready { color: var(--good); background: #dff4e9; }
+    .status.wait { color: var(--warn); background: #fff0d7; }
+    .status.refuse { color: var(--bad); background: #f9e3e1; }
+    dl { display: grid; grid-template-columns: 150px 1fr; gap: 8px 14px; margin: 14px 0 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+    .button-group { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 18px; }
+    button {
+      appearance: none;
+      border: 1px solid #bcc7ce;
+      background: #fff;
+      color: var(--ink);
+      padding: 9px 12px;
+      border-radius: 7px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.active { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+    button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+    button:disabled { cursor: default; opacity: .45; }
+    .pipeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+    .stage { min-height: 92px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .stage strong { display: block; margin-bottom: 5px; }
+    .stage span { color: var(--muted); font-size: 14px; }
+    .stage.ok { border-color: #91c8ad; background: #f1faf5; }
+    .stage.blocked { border-color: #e3bd86; background: #fff9ef; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 11px 10px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 600; }
+    tr.recommended td { background: #fffaf0; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .walkthrough { min-height: 235px; }
+    .steps { display: grid; gap: 9px; margin-top: 14px; }
+    .step { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+    .step-number { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: #eef2f4; font-weight: 700; }
+    .step.done { background: #f3faf6; border-color: #9bcbb2; }
+    .step.current { background: #fffaf0; border-color: var(--accent); }
+    .reason { margin-top: 12px; padding: 12px; border-radius: 8px; background: var(--panel); }
+    .small { font-size: 14px; color: var(--muted); }
+    footer { margin-top: 42px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    @media (max-width: 860px) {
+      .evidence, .workspace { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      main { width: min(100% - 24px, 1120px); margin-top: 24px; }
+      .pipeline { grid-template-columns: 1fr; }
+      dl { grid-template-columns: 1fr; gap: 2px; }
+      dd { margin-bottom: 7px; }
+      .step { grid-template-columns: 34px 1fr; }
+      .step button { grid-column: 2; justify-self: start; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">一次性决策原型 · 不属于生产实现</div>
+    <h1>黄色按钮的三维按压目标应怎样产生？</h1>
+    <p class="lede">这个原型检验的不是视觉界面，而是首版定位逻辑：在调用者不给坐标、G1 初始位置可以变化的情况下，哪些观测和标定事实足以输出可供运动模块使用的按钮中心、按压方向和不确定性；缺少什么时必须返回“无法判定”。</p>
+
+    <div class="notice"><strong>当前推荐：</strong>头部左目相机识别固定视觉标记并估计设备位姿，通过一次性标定得到按钮中心和按压方向；黄色区域检测只负责确认目标仍然存在。双目三角测量保留为无标记备选，腕部相机不进入首次定位链路。</div>
+
+    <h2>已经知道的现场事实</h2>
+    <section class="grid evidence">
+      <article class="card soft">
+        <div class="eyebrow">物理来源</div>
+        <div class="big">3 个相机</div>
+        <p>头部是一个左右目立体相机，另有左右腕部相机。历史数据将它们展开为四个逻辑视角。</p>
+      </article>
+      <article class="card soft">
+        <div class="eyebrow">标准起始姿态</div>
+        <div class="big">头部可见目标</div>
+        <p>历史首帧中，左右目都清楚看到设备和黄色按钮；腕部相机主要看到机器人与地面。</p>
+      </article>
+      <article class="card soft">
+        <div class="eyebrow">仍然缺失</div>
+        <div class="big">度量标定</div>
+        <p>没有可直接复用的相机内参、双目外参，以及头部相机到机器人操作坐标系的变换。</p>
+      </article>
+    </section>
+
+    <h2>自由探索</h2>
+    <section class="grid workspace">
+      <div class="card">
+        <h3>选择一条候选路线</h3>
+        <div class="button-group" id="route-buttons"></div>
+
+        <h3>切换一次性标定事实</h3>
+        <div class="button-group" id="calibration-buttons"></div>
+
+        <h3>切换当前观测事实</h3>
+        <div class="button-group" id="observation-buttons"></div>
+
+        <button id="reset" type="button">恢复初始状态</button>
+
+        <div class="pipeline" id="pipeline"></div>
+      </div>
+
+      <aside class="card soft">
+        <div class="eyebrow">当前判定</div>
+        <p><span id="status" class="status wait">等待事实</span></p>
+        <p id="reason" class="reason"></p>
+        <dl id="state"></dl>
+      </aside>
+    </section>
+
+    <h2>三条路线的真实代价</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>路线</th><th>运行时输入</th><th>一次性工作</th><th>主要失败方式</th><th>首版判断</th></tr>
+        </thead>
+        <tbody>
+          <tr class="recommended">
+            <td><strong>固定视觉标记 + 黄色确认</strong></td>
+            <td>头部左目图像、当前机器人关节状态</td>
+            <td>左目内参、相机安装变换、标记到按钮的刚体变换</td>
+            <td>标记被遮挡或黄色确认失败</td>
+            <td>推荐：度量路径最短，失败归因最清楚</td>
+          </tr>
+          <tr>
+            <td><strong>无标记双目三角测量</strong></td>
+            <td>同步左右目图像、当前机器人关节状态</td>
+            <td>双目内外参、校正模型、相机安装变换、面板法向恢复</td>
+            <td>黄色中心匹配错误、弱纹理面板法向不稳定</td>
+            <td>可行备选：环境更纯粹，但首版链路更长</td>
+          </tr>
+          <tr>
+            <td><strong>学习式检测与深度模型</strong></td>
+            <td>图像、模型权重和运行环境</td>
+            <td>训练数据、验证集、部署与失效分析</td>
+            <td>分布漂移、置信度失真、故障定位困难</td>
+            <td>推迟：当前固定设备和唯一黄色目标不需要它</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>引导场景</h2>
+    <div class="tabs" id="tabs"></div>
+    <section class="card walkthrough">
+      <h3 id="scenario-title"></h3>
+      <p id="scenario-description" class="small"></p>
+      <div class="steps" id="steps"></div>
+    </section>
+
+    <footer>
+      原型结论只回答首版视觉定位的数据流和拒绝条件。运动规划、接触控制、任务成功判定及安装验收由其他决策处理。双击本文件即可运行，无需安装依赖。
+    </footer>
+  </main>
+
+  <script>
+    // Portable decision logic. It owns no DOM and can be lifted out independently.
+    const VisionTargetLogic = (() => {
+      const initialState = () => ({
+        route: "fiducial",
+        leftIntrinsics: false,
+        cameraToRobot: false,
+        tagToButton: false,
+        stereoCalibration: false,
+        panelNormalMethod: false,
+        frameFresh: true,
+        tagVisible: false,
+        yellowLeft: false,
+        yellowRight: false,
+        stereoMatchConsistent: false
+      });
+
+      function reduce(state, action) {
+        if (action.type === "reset") return initialState();
+        if (action.type === "setRoute") return { ...initialState(), route: action.route };
+        if (action.type === "set") return { ...state, [action.field]: action.value };
+        if (action.type === "toggle") return { ...state, [action.field]: !state[action.field] };
+        return state;
+      }
+
+      function assess(state) {
+        if (state.route === "learned") {
+          return result("refuse", "首版拒绝学习式路线：固定设备、唯一黄色目标和一次成功的终点不足以证明训练与部署成本合理。", [
+            stage("观测", true, "头部图像"),
+            stage("二维定位", false, "需要新训练资产"),
+            stage("三维恢复", false, "深度来源未确定"),
+            stage("目标输出", false, "不进入首版")
+          ]);
+        }
+
+        if (!state.frameFresh) {
+          return result("wait", "当前图像不是新鲜观测。不得使用旧帧计算新的机器人目标。", commonStages(false));
+        }
+
+        if (!state.leftIntrinsics || !state.cameraToRobot) {
+          const missing = [
+            !state.leftIntrinsics && "头部左目内参",
+            !state.cameraToRobot && "相机到机器人操作坐标系的变换"
+          ].filter(Boolean).join("、");
+          return result("wait", `缺少${missing}，像素不能成为机器人可执行的度量目标。`, commonStages(false));
+        }
+
+        if (state.route === "fiducial") {
+          if (!state.tagToButton) {
+            return result("wait", "缺少视觉标记到按钮中心和按压方向的一次性刚体标定。", [
+              stage("观测", true, "头部左目"), stage("设备位姿", false, "标定不完整"), stage("黄色确认", false, "尚未运行"), stage("目标输出", false, "无度量目标")
+            ]);
+          }
+          if (!state.tagVisible) {
+            return result("wait", "当前观测中没有可靠识别固定视觉标记，因此无法确定设备相对于 G1 的位姿。", [
+              stage("观测", true, "新鲜左目图像"), stage("设备位姿", false, "标记不可见"), stage("黄色确认", false, "尚未运行"), stage("目标输出", false, "返回无法判定")
+            ]);
+          }
+          if (!state.yellowLeft) {
+            return result("wait", "预测的按钮区域内没有通过黄色与形状约束。标记只能给出几何位置，不能替代目标存在性检查。", [
+              stage("观测", true, "新鲜左目图像"), stage("设备位姿", true, "视觉标记 PnP"), stage("黄色确认", false, "颜色或形状不符"), stage("目标输出", false, "返回无法判定")
+            ]);
+          }
+          return result("ready", "可以输出按压目标。视觉标记负责度量位姿，黄色区域负责确认当前目标仍在预期位置。", [
+            stage("观测", true, "头部左目"), stage("设备位姿", true, "视觉标记 PnP"), stage("黄色确认", true, "HSV + 面积/圆度约束"), stage("目标输出", true, "按钮中心 + 按压方向 + 不确定性")
+          ], {
+            source: "视觉标记位姿 + 标定的按钮刚体变换",
+            cameras: "头部左目；右目仅作诊断",
+            target: "机器人操作坐标系中的按钮中心与按压方向",
+            uncertainty: "PnP 重投影误差、标定版本、黄色区域偏差",
+            refusal: "观测过期、标记不可见、黄色确认失败或目标不可达"
+          });
+        }
+
+        if (!state.stereoCalibration || !state.panelNormalMethod) {
+          const missing = [
+            !state.stereoCalibration && "双目内外参与校正模型",
+            !state.panelNormalMethod && "面板按压方向的恢复方法"
+          ].filter(Boolean).join("、");
+          return result("wait", `缺少${missing}。只有按钮中心的二维像素不足以定义三维按压动作。`, commonStages(false));
+        }
+        if (!state.yellowLeft || !state.yellowRight) {
+          return result("wait", "左右目没有同时识别到满足约束的黄色区域，不能进行双目三角测量。", [
+            stage("观测", true, "同步左右目"), stage("二维定位", false, "至少一侧缺失"), stage("三维恢复", false, "无法三角测量"), stage("目标输出", false, "返回无法判定")
+          ]);
+        }
+        if (!state.stereoMatchConsistent) {
+          return result("wait", "左右目黄色区域不满足极线与重投影一致性，拒绝把错误匹配转换为机器人目标。", [
+            stage("观测", true, "同步左右目"), stage("二维定位", true, "两侧均有候选"), stage("三维恢复", false, "匹配不一致"), stage("目标输出", false, "返回无法判定")
+          ]);
+        }
+        return result("ready", "可以通过校正后的左右目中心三角测量按钮位置，并用已验证的面板法向方法生成按压方向。", [
+          stage("观测", true, "同步左右目"), stage("二维定位", true, "双侧 HSV + 几何约束"), stage("三维恢复", true, "三角测量 + 面板法向"), stage("目标输出", true, "按钮中心 + 按压方向 + 不确定性")
+        ], {
+          source: "左右目黄色区域的校正后对应点",
+          cameras: "头部左右目；腕部不参与",
+          target: "机器人操作坐标系中的按钮中心与按压方向",
+          uncertainty: "重投影误差、视差误差、标定版本、左右目时间差",
+          refusal: "观测过期、单侧缺失、极线不一致或视差退化"
+        });
+      }
+
+      function result(status, reason, stages, output = null) { return { status, reason, stages, output }; }
+      function stage(name, ok, detail) { return { name, ok, detail }; }
+      function commonStages(ok) {
+        return [stage("观测", ok, ok ? "新鲜" : "等待"), stage("二维定位", false, "尚未运行"), stage("三维恢复", false, "尚未运行"), stage("目标输出", false, "无")];
+      }
+      return { initialState, reduce, assess };
+    })();
+
+    const routeOptions = [
+      ["fiducial", "固定视觉标记"],
+      ["stereo", "无标记双目"],
+      ["learned", "学习式模型"]
+    ];
+    const calibrationActions = [
+      ["leftIntrinsics", "左目内参"],
+      ["cameraToRobot", "相机到机器人变换"],
+      ["tagToButton", "标记到按钮变换"],
+      ["stereoCalibration", "双目标定"],
+      ["panelNormalMethod", "面板按压方向"]
+    ];
+    const observationActions = [
+      ["frameFresh", "观测新鲜"],
+      ["tagVisible", "视觉标记可见"],
+      ["yellowLeft", "左目黄色区域"],
+      ["yellowRight", "右目黄色区域"],
+      ["stereoMatchConsistent", "双目匹配一致"]
+    ];
+
+    const scenarios = [
+      {
+        title: "固定视觉标记：最短成功路径",
+        description: "观察单目度量位姿、黄色存在性确认和目标输出如何分工。任何一个条件缺失都返回无法判定，而不是猜测坐标。",
+        steps: [
+          ["setRoute", "选择固定视觉标记路线", { route: "fiducial" }],
+          ["set", "完成左目内参标定", { field: "leftIntrinsics", value: true }],
+          ["set", "完成相机到机器人变换", { field: "cameraToRobot", value: true }],
+          ["set", "记录标记到按钮的刚体变换", { field: "tagToButton", value: true }],
+          ["set", "在当前图像中识别视觉标记", { field: "tagVisible", value: true }],
+          ["set", "确认预测区域内存在黄色按钮", { field: "yellowLeft", value: true }]
+        ]
+      },
+      {
+        title: "无标记双目：完整但更长的链路",
+        description: "观察双目路线为什么不仅需要左右目黄色中心，还必须解决双目标定、匹配一致性和按压方向。",
+        steps: [
+          ["setRoute", "选择无标记双目路线", { route: "stereo" }],
+          ["set", "完成左目内参标定", { field: "leftIntrinsics", value: true }],
+          ["set", "完成相机到机器人变换", { field: "cameraToRobot", value: true }],
+          ["set", "完成双目内外参与校正", { field: "stereoCalibration", value: true }],
+          ["set", "确定面板按压方向恢复方法", { field: "panelNormalMethod", value: true }],
+          ["set", "左右目都识别黄色区域", { field: "yellowLeft", value: true }],
+          ["set", "右目也识别黄色区域", { field: "yellowRight", value: true }],
+          ["set", "通过极线和重投影一致性", { field: "stereoMatchConsistent", value: true }]
+        ]
+      },
+      {
+        title: "拒绝旧帧：不把过去的按钮变成现在的目标",
+        description: "即使所有标定和识别条件都曾满足，只要当前帧过期，就必须返回无法判定。",
+        steps: [
+          ["setRoute", "选择固定视觉标记路线", { route: "fiducial" }],
+          ["set", "完成左目内参标定", { field: "leftIntrinsics", value: true }],
+          ["set", "完成相机到机器人变换", { field: "cameraToRobot", value: true }],
+          ["set", "记录标记到按钮的刚体变换", { field: "tagToButton", value: true }],
+          ["set", "识别视觉标记", { field: "tagVisible", value: true }],
+          ["set", "确认黄色按钮", { field: "yellowLeft", value: true }],
+          ["set", "模拟观测已经过期", { field: "frameFresh", value: false }]
+        ]
+      },
+      {
+        title: "学习式路线：为什么首版拒绝",
+        description: "当前问题能由固定几何、颜色和一次性标定解决。模型训练不会自动补上相机标定或机器人坐标变换。",
+        steps: [["setRoute", "选择学习式模型路线", { route: "learned" }]]
+      }
+    ];
+
+    let state = VisionTargetLogic.initialState();
+    let activeScenario = 0;
+    let scenarioStep = 0;
+
+    function dispatch(action) {
+      state = VisionTargetLogic.reduce(state, action);
+      render();
+    }
+
+    function makeButton(label, active, action) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      if (active) button.classList.add("active");
+      button.addEventListener("click", () => dispatch(action));
+      return button;
+    }
+
+    function renderButtons() {
+      const routes = document.querySelector("#route-buttons");
+      routes.replaceChildren(...routeOptions.map(([value, label]) => makeButton(label, state.route === value, { type: "setRoute", route: value })));
+
+      const calibrations = document.querySelector("#calibration-buttons");
+      calibrations.replaceChildren(...calibrationActions.map(([field, label]) => makeButton(label, state[field], { type: "toggle", field })));
+
+      const observations = document.querySelector("#observation-buttons");
+      observations.replaceChildren(...observationActions.map(([field, label]) => makeButton(label, state[field], { type: "toggle", field })));
+    }
+
+    function renderAssessment() {
+      const assessment = VisionTargetLogic.assess(state);
+      const status = document.querySelector("#status");
+      const labels = { ready: "可输出目标", wait: "无法判定", refuse: "首版拒绝" };
+      status.textContent = labels[assessment.status];
+      status.className = `status ${assessment.status}`;
+      document.querySelector("#reason").textContent = assessment.reason;
+
+      const pipeline = document.querySelector("#pipeline");
+      pipeline.replaceChildren(...assessment.stages.map(item => {
+        const el = document.createElement("div");
+        el.className = `stage ${item.ok ? "ok" : "blocked"}`;
+        const title = document.createElement("strong");
+        title.textContent = item.name;
+        const detail = document.createElement("span");
+        detail.textContent = item.detail;
+        el.append(title, detail);
+        return el;
+      }));
+
+      const fields = assessment.output || {
+        source: "无",
+        cameras: state.route === "stereo" ? "头部左右目" : state.route === "fiducial" ? "头部左目" : "未进入首版",
+        target: "无",
+        uncertainty: "无",
+        refusal: assessment.reason
+      };
+      const statePanel = document.querySelector("#state");
+      const names = { source: "坐标来源", cameras: "使用相机", target: "输出内容", uncertainty: "不确定性", refusal: "拒绝条件" };
+      statePanel.replaceChildren(...Object.entries(fields).flatMap(([key, value]) => {
+        const dt = document.createElement("dt");
+        dt.textContent = names[key];
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        return [dt, dd];
+      }));
+    }
+
+    function startScenario(index) {
+      activeScenario = index;
+      scenarioStep = 0;
+      state = VisionTargetLogic.initialState();
+      render();
+    }
+
+    function runScenarioStep(index) {
+      const [type, , data] = scenarios[activeScenario].steps[index];
+      state = VisionTargetLogic.reduce(state, { type, ...data });
+      scenarioStep = Math.max(scenarioStep, index + 1);
+      render();
+    }
+
+    function renderScenario() {
+      const tabs = document.querySelector("#tabs");
+      tabs.replaceChildren(...scenarios.map((scenario, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = scenario.title;
+        if (index === activeScenario) button.classList.add("active");
+        button.addEventListener("click", () => startScenario(index));
+        return button;
+      }));
+      const scenario = scenarios[activeScenario];
+      document.querySelector("#scenario-title").textContent = scenario.title;
+      document.querySelector("#scenario-description").textContent = scenario.description;
+      const steps = document.querySelector("#steps");
+      steps.replaceChildren(...scenario.steps.map(([, label], index) => {
+        const row = document.createElement("div");
+        row.className = `step ${index < scenarioStep ? "done" : index === scenarioStep ? "current" : ""}`;
+        const number = document.createElement("span");
+        number.className = "step-number";
+        number.textContent = index + 1;
+        const text = document.createElement("span");
+        text.textContent = label;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = index < scenarioStep ? "已执行" : "执行";
+        button.disabled = index !== scenarioStep;
+        if (index === scenarioStep) button.classList.add("primary");
+        button.addEventListener("click", () => runScenarioStep(index));
+        row.append(number, text, button);
+        return row;
+      }));
+    }
+
+    function render() {
+      renderButtons();
+      renderAssessment();
+      renderScenario();
+    }
+
+    document.querySelector("#reset").addEventListener("click", () => {
+      state = VisionTargetLogic.initialState();
+      scenarioStep = 0;
+      render();
+    });
+    render();
+  </script>
+</body>
+</html>
