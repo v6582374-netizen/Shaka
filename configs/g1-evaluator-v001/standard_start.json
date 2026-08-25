@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "configuration_id": "g1-evaluator-v001-standard-start",
+  "captured_at_date": "2026-08-26",
+  "robot_mode": {
+    "fsm_id": 500,
+    "fsm_mode": 0,
+    "task_id": 4,
+    "mode_pr": 0,
+    "mode_machine": 6
+  },
+  "pose": {
+    "arm_units": "radian",
+    "arm_joint_order": [
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "arm_values": [
+      0.28975459933280945,
+      0.22158832848072052,
+      -0.009970875456929207,
+      0.9765945076942444,
+      0.062929168343544,
+      0.023669324815273285,
+      0.016766410320997238,
+      0.2913604974746704,
+      -0.20999957621097565,
+      0.017724668607115746,
+      0.979686439037323,
+      -0.15126489102840424,
+      0.02925301529467106,
+      -0.012954468838870525
+    ],
+    "hand_units": "brainco_normalized_position",
+    "hand_joint_order": [
+      "left_thumb",
+      "left_thumb_aux",
+      "left_index",
+      "left_middle",
+      "left_ring",
+      "left_pinky",
+      "right_thumb",
+      "right_thumb_aux",
+      "right_index",
+      "right_middle",
+      "right_ring",
+      "right_pinky"
+    ],
+    "hand_values": [
+      0.39899998903274536,
+      0.39899998903274536,
+      0.05000000074505806,
+      0.05000000074505806,
+      0.05000000074505806,
+      0.04899999871850014,
+      0.4000000059604645,
+      0.39899998903274536,
+      0.05000000074505806,
+      0.04899999871850014,
+      0.04899999871850014,
+      0.05000000074505806
+    ],
+    "readiness_tolerance": {
+      "maximum_arm_absolute_error_rad": 0.05,
+      "maximum_hand_absolute_error_normalized": 0.02
+    },
+    "observed_static_drift": {
+      "samples": 251,
+      "maximum_arm_drift_rad": 0.000059917569160461426,
+      "maximum_hand_drift_normalized": 0.0
+    }
+  },
+  "scene": {
+    "device_pose": "fixed_by_physical_fixture_and_baseline_evidence",
+    "robot_base_pose": "fixed_after_baseline_capture; feet must not move",
+    "head_camera_logical_view_size": [640, 480],
+    "yellow_button_baseline_bbox": {
+      "cam_left_high": [510, 279, 26, 26],
+      "cam_right_high": [480, 282, 26, 26]
+    },
+    "wrist_camera_start_visibility": "yellow button not visible at the standard start; wrist views become auxiliary during approach"
+  },
+  "source_evidence": {
+    "episode_id": "SMOKE-20260826-ready-001",
+    "controlled_storage_path": "/mnt/data-hdd/Shaka/evaluator-evidence-smoke/SMOKE-20260826-ready-001",
+    "sha256_manifest_sha256": "cfbad6604a56dca6132ca5109f59bce233f29e13b25e366d14c2da9b87d742e6",
+    "capture_metadata_sha256": "c3a20beb6e0ce556f2c56ca135eb2d3b6898022cf725daa15005171d771081c2",
+    "command_publishers_created": 0,
+    "writes": 0
+  },
+  "invalidation_conditions": [
+    "device pose changes",
+    "G1 feet or base pose changes",
+    "camera installation or configuration changes",
+    "hand installation changes",
+    "calibration changes",
+    "robot mode differs from the recorded mode",
+    "readiness tolerance is exceeded"
+  ]
+}
