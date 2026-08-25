@@ -112,6 +112,22 @@ sha256.txt
 
 允许换用无损保真的容器格式，但四路原始画面不得只保存拼接视频；所有流必须能通过同一单调时钟对齐。`capture_metadata.json` 引用冻结配置的摘要，不应逐回合复制并漂移配置。
 
+当前 G1 数据面由三个物理相机流产生四个逻辑视角：头部相机的一张 `1280×480` 原始 JPEG 包含左右两个 `640×480` 视角，另外两个流分别来自左右腕相机。`scripts/record_evaluator_episode.py` 按接收字节原样保存三个物理 JPEG 流，并在元数据中声明头部左右视角的派生关系；这比拆分后重新编码为四段视频更接近原始证据。`camera_timestamps.csv` 保存每帧的来源时钟、序号和摘要。
+
+工作站时钟不能默认等于 G1 机载时钟。记录器使用状态包中的 G1 组装时间与工作站接收时间估计偏移，在 `brainco_current.csv` 中同时保存原始本机接收时间和换算到 G1 时钟域的估计时间；`capture_metadata.json` 保存偏移量及其采样范围。若偏移范围在一个回合内明显漂移，该回合不得进入正式材料。
+
+只读冒烟记录可使用：
+
+```bash
+PYTHONPATH=/home/loongge/TWIST2-master/unitree_sdk2/python_binding/build-py310/lib \
+  /home/loongge/miniconda3/envs/lerobot/bin/python \
+  scripts/record_evaluator_episode.py \
+  --episode-id SMOKE-YYYYMMDD-static \
+  --output-root /mnt/data-hdd/Shaka/evaluator-evidence-smoke
+```
+
+该记录器只创建 DDS reader 和 ZeroMQ subscriber；它没有命令 topic、策略调用或执行权限。正式材料仍需将控制器与硬件保护事件接入同一个 `controller_events.jsonl`，不能把记录器自身的零写入事件当作完整控制日志。
+
 ## 事实标注
 
 标注者先观察四路原始视频，再用机器人状态、运动学、时间戳和电流交叉核对。BrainCo 电流不得单独把案例标成接触或成功。
