@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>黄色按钮独立判定逻辑原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1e2430;
+      --muted: #667085;
+      --line: #dfe3ea;
+      --panel: #f7f8fa;
+      --accent: #a66a00;
+      --accent-soft: #fff5d6;
+      --good: #16794a;
+      --bad: #b42318;
+      --warn: #9a6700;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--ink);
+      font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 48px auto 80px;
+    }
+
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin-bottom: 8px; font-size: clamp(28px, 4vw, 44px); }
+    h2 { margin-top: 0; font-size: 22px; }
+    h3 { font-size: 17px; }
+    p { max-width: 78ch; }
+
+    .eyebrow {
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .notice {
+      margin: 24px 0;
+      padding: 16px 18px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin: 24px 0;
+    }
+
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .state-card { background: var(--panel); }
+
+    .verdict {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: #e8ebf0;
+      font-weight: 750;
+    }
+
+    .badge.succeeded { color: var(--good); background: #dcfae6; }
+    .badge.failed, .badge.aborted { color: var(--bad); background: #fee4e2; }
+    .badge.indeterminate { color: var(--warn); background: #fef0c7; }
+    .badge.abstained { color: #475467; background: #eaecf0; }
+
+    dl {
+      display: grid;
+      grid-template-columns: minmax(150px, .7fr) minmax(170px, 1fr);
+      gap: 8px 14px;
+      margin: 0;
+    }
+
+    dt { color: var(--muted); }
+    dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      min-height: 42px;
+      padding: 9px 14px;
+      border: 1px solid #c9ced8;
+      border-radius: 9px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button:hover { border-color: var(--accent); }
+    button.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15px;
+    }
+
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { color: var(--muted); font-weight: 650; }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+
+    .tabs button[aria-selected="true"] {
+      color: #fff;
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+
+    .walkthrough {
+      margin-top: 14px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+
+    .steps {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .step.done { background: #f0fdf4; }
+    .step-index { color: var(--muted); font-weight: 750; text-align: center; }
+
+    .event-log {
+      min-height: 140px;
+      max-height: 260px;
+      overflow: auto;
+      margin: 0;
+      padding: 14px 14px 14px 34px;
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 10px;
+      font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .small { color: var(--muted); font-size: 14px; }
+
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 28px 1fr; }
+      .step button { grid-column: 2; }
+      dl { grid-template-columns: 1fr; gap: 2px; }
+      dd { margin-bottom: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">一次性逻辑原型 · 不属于生产系统</div>
+    <h1>黄色按钮独立判定逻辑</h1>
+    <p>这个原型检验：在设备不通电时，哪些证据足以证明按钮完成了“按下—释放”机械循环，哪些证据只能证明手指发生过接触，以及何时必须返回 <code>indeterminate</code>。</p>
+
+    <div class="notice">
+      <strong>原型假设：</strong>独立固定近距离相机经过一次人工标定，能够把按钮帽相对静止外壳的运动投影成一条一维位移曲线。BrainCo 电流、候选模型自报完成和机器人关节状态都不是任务真值。
+    </div>
+
+    <section class="grid">
+      <article class="card state-card">
+        <h2>当前判定</h2>
+        <div class="verdict">
+          <span id="verdict" class="badge">pending</span>
+          <span id="reason">等待本次调用结束</span>
+        </div>
+        <dl id="state"></dl>
+      </article>
+
+      <article class="card">
+        <h2>证据记录</h2>
+        <ol id="event-log" class="event-log"></ol>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>自由试验</h2>
+      <p class="small">可以任意顺序点击。非法或不足以改变真值的事件仍会被记录，从而暴露判定边界。</p>
+      <div id="free-actions" class="actions"></div>
+    </section>
+
+    <section style="margin-top: 34px">
+      <h2>引导场景</h2>
+      <div id="tabs" class="tabs" role="tablist"></div>
+      <div id="walkthrough" class="walkthrough"></div>
+    </section>
+
+    <section class="card" style="margin-top: 34px">
+      <h2>证据源是否足够</h2>
+      <table>
+        <thead>
+          <tr><th>证据源</th><th>能够证明</th><th>不能单独证明</th><th>首版地位</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>候选模型自报完成</td>
+            <td>候选实现认为动作结束</td>
+            <td>接触、有效按下、释放</td>
+            <td>仅审计，不参与判定</td>
+          </tr>
+          <tr>
+            <td>BrainCo 电流或接触代理</td>
+            <td>某时刻可能承受负载</td>
+            <td>负载来自按钮、按钮达到有效行程、按钮已释放</td>
+            <td>辅助时间对齐，不授予成功</td>
+          </tr>
+          <tr>
+            <td>未标定的近距离视频</td>
+            <td>诊断接触方式和遮挡</td>
+            <td>可复现的有效机械行程</td>
+            <td>发现阶段诊断证据</td>
+          </tr>
+          <tr>
+            <td>标定后的独立按钮位移曲线</td>
+            <td>释放基线、达到按下阈值、返回释放区间及其顺序</td>
+            <td>设备通电后的功能响应</td>
+            <td>首版任务真值</td>
+          </tr>
+          <tr>
+            <td>外接物理位移传感器</td>
+            <td>与视觉相同的机械位移事实</td>
+            <td>除非另行设计，仍不证明设备功能响应</td>
+            <td>仅在视觉分辨率或遮挡不合格时升级</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" style="margin-top: 18px">
+      <h2>最低成本的真机可观测性试验</h2>
+      <ol>
+        <li>把现有相机或普通 USB 相机固定在不会被按压手遮挡的侧前方，只拍按钮帽和静止外壳；它不向 VLA 提供输入。</li>
+        <li>人工记录释放位置和完整按下位置，得到按下阈值、释放区间与测量误差；不需要恢复三维坐标。</li>
+        <li>录制 5 次人工完整按下—释放，并故意录制接触但未达到行程、按下后未释放、关键阶段遮挡各至少一次。</li>
+        <li>如果按钮位移相对测量误差没有清晰余量，或按压手必然遮挡关键阶段，再升级到独立物理位移传感器；否则不增加硬件。</li>
+      </ol>
+      <p class="small">这里的 5 次只用于判断测量方案是否可用，不是安装验收样本量。安装验收门槛由后续议题单独决定。</p>
+    </section>
+  </main>
+
+  <script>
+    // 可移植的纯状态机：不依赖 DOM，也不读取候选实现的内部状态。
+    const Evaluator = (() => {
+      const initialState = () => ({
+        phase: "before_motion",
+        motionStarted: false,
+        endedNormally: false,
+        abortReason: null,
+        baselineReleasedObserved: false,
+        pressThresholdCrossed: false,
+        releaseObservedAfterPress: false,
+        handRetreated: false,
+        criticalVisualCoverageComplete: true,
+        auditRecordComplete: true,
+        contactProxyObserved: false,
+        candidateClaimedComplete: false,
+        events: []
+      });
+
+      const labels = {
+        OBSERVE_RELEASED_BASELINE: "独立相机确认释放基线",
+        START_MOTION: "机器人开始运动",
+        OBSERVE_CONTACT_PROXY: "观察到电流/接触代理",
+        CROSS_PRESS_THRESHOLD: "按钮位移越过按下阈值",
+        LOSE_CRITICAL_VISUAL: "关键阶段视觉证据丢失",
+        RETURN_TO_RELEASE_BAND: "按钮返回释放区间",
+        OBSERVE_RETREAT: "确认手已撤离",
+        CANDIDATE_CLAIMS_COMPLETE: "候选模型自报完成",
+        CORRUPT_AUDIT_RECORD: "审计记录缺失或损坏",
+        END_NORMALLY: "动作正常结束",
+        ABORT: "硬件保护或急停中止",
+        ABSTAIN: "运动前拒绝执行",
+        RESET: "开始新的调用"
+      };
+
+      function append(state, type, accepted, note = "") {
+        return {
+          ...state,
+          events: [...state.events, { type, label: labels[type], accepted, note }]
+        };
+      }
+
+      function transition(state, action) {
+        if (action.type === "RESET") return initialState();
+        if (["ended", "aborted", "abstained"].includes(state.phase)) {
+          return append(state, action.type, false, "调用已经结束；请先开始新的调用");
+        }
+
+        switch (action.type) {
+          case "OBSERVE_RELEASED_BASELINE":
+            if (state.motionStarted) return append(state, action.type, false, "基线必须在运动前建立");
+            return append({ ...state, baselineReleasedObserved: true }, action.type, true);
+          case "START_MOTION":
+            return append({ ...state, phase: "in_motion", motionStarted: true }, action.type, true);
+          case "OBSERVE_CONTACT_PROXY":
+            return append({ ...state, contactProxyObserved: true }, action.type, true, "只作为辅助信号");
+          case "CROSS_PRESS_THRESHOLD":
+            if (!state.motionStarted) return append(state, action.type, false, "尚未开始运动");
+            return append({ ...state, phase: "press_observed", pressThresholdCrossed: true }, action.type, true);
+          case "LOSE_CRITICAL_VISUAL":
+            if (!state.motionStarted) return append(state, action.type, false, "运动前丢帧不影响本次关键区间");
+            return append({ ...state, criticalVisualCoverageComplete: false }, action.type, true);
+          case "RETURN_TO_RELEASE_BAND":
+            if (!state.pressThresholdCrossed) return append(state, action.type, false, "尚未证明达到按下阈值");
+            return append({ ...state, phase: "cycle_observed", releaseObservedAfterPress: true }, action.type, true);
+          case "OBSERVE_RETREAT":
+            if (!state.motionStarted) return append(state, action.type, false, "尚未开始运动");
+            return append({ ...state, handRetreated: true }, action.type, true);
+          case "CANDIDATE_CLAIMS_COMPLETE":
+            return append({ ...state, candidateClaimedComplete: true }, action.type, true, "不改变独立判定");
+          case "CORRUPT_AUDIT_RECORD":
+            return append({ ...state, auditRecordComplete: false }, action.type, true);
+          case "END_NORMALLY":
+            return append({ ...state, phase: "ended", endedNormally: true }, action.type, true);
+          case "ABORT":
+            return append({ ...state, phase: "aborted", abortReason: action.reason || "hardware_protection" }, action.type, true);
+          case "ABSTAIN":
+            if (state.motionStarted) return append(state, action.type, false, "运动开始后只能中止，不能 abstain");
+            return append({ ...state, phase: "abstained" }, action.type, true);
+          default:
+            return append(state, action.type, false, "未知事件");
+        }
+      }
+
+      function evaluate(state) {
+        if (state.phase === "abstained") {
+          return { verdict: "abstained", reason: "运动前拒绝执行，没有产生按压尝试" };
+        }
+        if (state.phase === "aborted") {
+          return { verdict: "aborted", reason: "动作开始后被硬件保护、急停或运行异常中止" };
+        }
+        if (!state.endedNormally) {
+          return { verdict: "pending", reason: "等待本次调用结束" };
+        }
+        if (!state.motionStarted) {
+          return { verdict: "abstained", reason: "动作正常结束，但没有开始机器人运动" };
+        }
+        if (!state.baselineReleasedObserved || !state.criticalVisualCoverageComplete || !state.auditRecordComplete) {
+          return { verdict: "indeterminate", reason: "动作已经发生，但独立证据链不完整" };
+        }
+        if (state.pressThresholdCrossed && state.releaseObservedAfterPress && state.handRetreated) {
+          return { verdict: "succeeded", reason: "独立证据证明按下、释放且手已撤离" };
+        }
+        if (state.pressThresholdCrossed && state.releaseObservedAfterPress && !state.handRetreated) {
+          return { verdict: "failed", reason: "机械循环完成，但调用结束时手没有撤离" };
+        }
+        if (state.pressThresholdCrossed && !state.releaseObservedAfterPress) {
+          return { verdict: "failed", reason: "达到按下阈值，但没有返回释放区间" };
+        }
+        return { verdict: "failed", reason: "证据完整，但按钮没有达到有效按下行程" };
+      }
+
+      return { initialState, transition, evaluate, labels };
+    })();
+
+    const actions = [
+      ["OBSERVE_RELEASED_BASELINE", "确认释放基线"],
+      ["START_MOTION", "开始运动"],
+      ["OBSERVE_CONTACT_PROXY", "记录接触代理"],
+      ["CROSS_PRESS_THRESHOLD", "越过按下阈值"],
+      ["LOSE_CRITICAL_VISUAL", "丢失关键视觉"],
+      ["RETURN_TO_RELEASE_BAND", "返回释放区间"],
+      ["OBSERVE_RETREAT", "确认手已撤离"],
+      ["CANDIDATE_CLAIMS_COMPLETE", "候选自报完成"],
+      ["CORRUPT_AUDIT_RECORD", "破坏审计记录"],
+      ["END_NORMALLY", "正常结束"],
+      ["ABORT", "硬件中止"],
+      ["ABSTAIN", "运动前拒绝"],
+      ["RESET", "开始新的调用"]
+    ];
+
+    const scenarios = [
+      {
+        title: "完整成功",
+        description: "观察一条完整、独立且顺序正确的机械按下—释放证据链。",
+        steps: ["OBSERVE_RELEASED_BASELINE", "START_MOTION", "OBSERVE_CONTACT_PROXY", "CROSS_PRESS_THRESHOLD", "RETURN_TO_RELEASE_BAND", "OBSERVE_RETREAT", "END_NORMALLY"]
+      },
+      {
+        title: "只接触",
+        description: "有 BrainCo 电流变化，也有候选自报完成，但按钮未达到有效行程。结果应为 failed，而不是 succeeded。",
+        steps: ["OBSERVE_RELEASED_BASELINE", "START_MOTION", "OBSERVE_CONTACT_PROXY", "CANDIDATE_CLAIMS_COMPLETE", "OBSERVE_RETREAT", "END_NORMALLY"]
+      },
+      {
+        title: "按下未释放",
+        description: "按钮达到按下阈值，却没有回到释放区间。证据充分，因此不是 indeterminate。",
+        steps: ["OBSERVE_RELEASED_BASELINE", "START_MOTION", "CROSS_PRESS_THRESHOLD", "OBSERVE_RETREAT", "END_NORMALLY"]
+      },
+      {
+        title: "关键阶段遮挡",
+        description: "机器人确实动作了，但独立相机在关键阶段丢失证据。即使候选自报完成，也只能返回 indeterminate。",
+        steps: ["OBSERVE_RELEASED_BASELINE", "START_MOTION", "LOSE_CRITICAL_VISUAL", "CANDIDATE_CLAIMS_COMPLETE", "OBSERVE_RETREAT", "END_NORMALLY"]
+      },
+      {
+        title: "完成后中止",
+        description: "即使已经观察到机械循环，只要本次调用最终由硬件保护中止，调用结果仍是 aborted，不能计为首次验证成功。",
+        steps: ["OBSERVE_RELEASED_BASELINE", "START_MOTION", "CROSS_PRESS_THRESHOLD", "RETURN_TO_RELEASE_BAND", "ABORT"]
+      }
+    ];
+
+    let state = Evaluator.initialState();
+    let activeScenario = 0;
+    let completedSteps = 0;
+
+    const human = value => value ? "是" : "否";
+
+    function dispatch(type) {
+      state = Evaluator.transition(state, { type });
+      render();
+    }
+
+    function render() {
+      const result = Evaluator.evaluate(state);
+      const verdict = document.querySelector("#verdict");
+      verdict.textContent = result.verdict;
+      verdict.className = `badge ${result.verdict}`;
+      document.querySelector("#reason").textContent = result.reason;
+
+      const fields = [
+        ["调用阶段", state.phase],
+        ["释放基线已观察", human(state.baselineReleasedObserved)],
+        ["达到按下阈值", human(state.pressThresholdCrossed)],
+        ["按下后返回释放区间", human(state.releaseObservedAfterPress)],
+        ["手已撤离", human(state.handRetreated)],
+        ["关键视觉证据连续", human(state.criticalVisualCoverageComplete)],
+        ["审计记录完整", human(state.auditRecordComplete)],
+        ["接触代理已观察", human(state.contactProxyObserved)],
+        ["候选自报完成", human(state.candidateClaimedComplete)]
+      ];
+      document.querySelector("#state").innerHTML = fields.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+
+      document.querySelector("#event-log").innerHTML = state.events.length
+        ? state.events.map(event => `<li>${event.accepted ? "✓" : "×"} ${event.label}${event.note ? ` — ${event.note}` : ""}</li>`).join("")
+        : "<li>尚无事件</li>";
+
+      renderWalkthrough();
+    }
+
+    function renderFreeActions() {
+      document.querySelector("#free-actions").innerHTML = actions.map(([type, label]) =>
+        `<button data-action="${type}" class="${type === "END_NORMALLY" ? "primary" : ""}">${label}</button>`
+      ).join("");
+      document.querySelectorAll("[data-action]").forEach(button => {
+        button.addEventListener("click", () => dispatch(button.dataset.action));
+      });
+    }
+
+    function startScenario(index) {
+      activeScenario = index;
+      completedSteps = 0;
+      state = Evaluator.initialState();
+      renderTabs();
+      render();
+    }
+
+    function runScenarioStep(index) {
+      if (index !== completedSteps) return;
+      dispatch(scenarios[activeScenario].steps[index]);
+      completedSteps += 1;
+      renderWalkthrough();
+    }
+
+    function renderTabs() {
+      document.querySelector("#tabs").innerHTML = scenarios.map((scenario, index) =>
+        `<button role="tab" aria-selected="${index === activeScenario}" data-tab="${index}">${scenario.title}</button>`
+      ).join("");
+      document.querySelectorAll("[data-tab]").forEach(button => {
+        button.addEventListener("click", () => startScenario(Number(button.dataset.tab)));
+      });
+    }
+
+    function renderWalkthrough() {
+      const scenario = scenarios[activeScenario];
+      document.querySelector("#walkthrough").innerHTML = `
+        <h3>${scenario.title}</h3>
+        <p>${scenario.description}</p>
+        <button id="restart-scenario">重新开始此场景</button>
+        <div class="steps">
+          ${scenario.steps.map((type, index) => `
+            <div class="step ${index < completedSteps ? "done" : ""}">
+              <span class="step-index">${index + 1}</span>
+              <span>${Evaluator.labels[type]}</span>
+              <button data-step="${index}" ${index !== completedSteps ? "disabled" : ""}>执行</button>
+            </div>
+          `).join("")}
+        </div>`;
+      document.querySelector("#restart-scenario").addEventListener("click", () => startScenario(activeScenario));
+      document.querySelectorAll("[data-step]").forEach(button => {
+        button.addEventListener("click", () => runScenarioStep(Number(button.dataset.step)));
+      });
+    }
+
+    renderFreeActions();
+    renderTabs();
+    render();
+  </script>
+</body>
+</html>
