@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "g1-yellow-button-vlm-v001",
+  "model": "gpt-5.6",
+  "image_detail": "high",
+  "maximum_panels": 16,
+  "pre_roll_seconds": 1.0,
+  "post_roll_seconds": 1.0,
+  "designated_fingertip": "right_index_fingertip",
+  "task_contract": "The invocation succeeds only when recorded visual evidence shows the right index fingertip contact the yellow button and subsequently withdraw from the device. Button travel and downstream device response are irrelevant.",
+  "audit_policy": {
+    "mode": "shadow",
+    "audit_all_results": true
+  }
+}
