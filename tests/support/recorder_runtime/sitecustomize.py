@@ -105,6 +105,11 @@ class DataReader:
     def take_iter(self, timeout: object):
         del timeout
         time.sleep(0.002)
+        if (
+            os.environ.get("SHAKA_FAKE_PREFLIGHT_EMPTY")
+            and "state_envelope" in self.topic_name
+        ):
+            return
         with LOCK:
             count = TOPIC_READS.get(self.topic_name, 0) + 1
             TOPIC_READS[self.topic_name] = count
@@ -131,12 +136,27 @@ class BuiltinDataReader:
 
     def take_iter(self, condition: object, timeout: object):
         del condition, timeout
-        for topic_name in (
+        topics: tuple[str, ...] = (
             "rt/vegapunk/g1/state_envelope",
             "rt/brainco/left/state",
             "rt/brainco/right/state",
-        ):
-            yield types.SimpleNamespace(topic_name=topic_name, type_id=topic_name)
+        )
+        competing_publisher = os.environ.get("SHAKA_FAKE_COMMAND_PUBLISHER")
+        if competing_publisher:
+            yield types.SimpleNamespace(
+                topic_name=competing_publisher,
+                type_id=competing_publisher,
+                participant_key=os.environ.get(
+                    "SHAKA_FAKE_COMMAND_PUBLISHER_KEY",
+                    "00000000-0000-0000-0000-000000000001",
+                ),
+            )
+        for topic_name in topics:
+            yield types.SimpleNamespace(
+                topic_name=topic_name,
+                type_id=topic_name,
+                participant_key="00000000-0000-0000-0000-000000000000",
+            )
 
 
 class ReadCondition:

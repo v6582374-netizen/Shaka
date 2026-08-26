@@ -128,6 +128,27 @@ class FinalizeEvaluatorEpisodeTest(unittest.TestCase):
         self.assertFalse(result["capture_valid"])
         self.assertLess(result["coverage"]["head_camera"]["end_margin_ns"], 0)
 
+    def test_converts_local_zero_write_trace_to_the_g1_clock(self) -> None:
+        episode, trace, stdout, temporary = self._fixture(camera_end_ns=1200)
+        self.addCleanup(temporary.cleanup)
+        metadata_path = episode / "capture_metadata.json"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["local_minus_g1_clock_offset_ns"] = 1000
+        metadata_path.write_text(json.dumps(metadata))
+        trace_value = json.loads(trace.read_text())
+        trace_value["loop_clock_id"] = "local_utc_ns"
+        for index, frame in enumerate(trace_value["frames"]):
+            frame["candidate_source_time_ns"] = 2000 + index * 100
+            frame["loop_now_ns"] = 2000 + index * 100
+        trace.write_text(json.dumps(trace_value))
+
+        result = MODULE.finalize(episode, trace, stdout)
+
+        self.assertTrue(result["capture_valid"])
+        metadata = json.loads(metadata_path.read_text())
+        self.assertEqual(metadata["controller"]["estimated_start_ns"], 1000)
+        self.assertEqual(metadata["controller"]["estimated_end_ns"], 1100)
+
 
 if __name__ == "__main__":
     unittest.main()

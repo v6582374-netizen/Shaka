@@ -1,10 +1,111 @@
 # Single-invocation runner
 
-`scripts/run_single_invocation.py` runs the first offline, zero-write invocation
-path from one immutable JSON manifest:
+`scripts/run_single_invocation.py` runs a zero-write invocation path from one
+immutable JSON manifest. Offline replay is the default; a separately configured
+connected-G1 path is available for the final physical admission gate:
 
 ```bash
 python scripts/run_single_invocation.py --manifest /path/to/run-manifest.json
+```
+
+## Connected-G1 zero-write acceptance
+
+Run this only after the offline candidate admission, evaluator configuration,
+and recorder lifecycle checks have passed. It starts DDS readers and ZeroMQ
+subscribers only. It never creates a G1 or BrainCo command publisher, sends an
+actuator command, moves the robot, or requests automatic reset.
+
+The immutable manifest must add this exact shape. `command_topics` must list
+every actuator-command topic owned by the unique robot-control entry point for
+this deployment; the placeholder below is not a safe default for another G1
+installation.
+
+```json
+{
+  "connected_g1": {
+    "schema_version": 1,
+    "network_interface": "enp0s31f6",
+    "camera_host": "192.168.123.164",
+    "discovery_timeout_s": 8.0,
+    "command_topics": ["rt/lowcmd"],
+    "allowed_command_publishers": [
+      {
+        "topic": "rt/lowcmd",
+        "participant_key": "<DDS participant UUID of the unique control entry>"
+      }
+    ]
+  }
+}
+```
+
+`allowed_command_publishers` is optional and may contain only one DDS
+participant UUID: the deployment's existing unique control entry. That entry
+may own more than one protected topic, but a second participant UUID is
+rejected. This makes the entry auditable without masking a competing publisher:
+every observed publisher on a protected topic that is not listed here rejects
+the run. Do not copy the example UUID; discover the currently active entry
+immediately before creating the immutable manifest.
+
+Before issuing the command, an operator must confirm that the G1, both BrainCo
+hands, three physical camera streams (the head stream supplies two logical
+views), network interface, emergency stop, fixed device pose, and standard
+manipulator start state are ready. Stop every command publisher other than the
+manifest-bound unique control entry. The command refuses to proceed if it
+discovers an unbound publisher on a protected topic.
+
+```bash
+PYTHONPATH=/home/loongge/TWIST2-master/unitree_sdk2/python_binding/build-py310/lib \
+  /home/loongge/miniconda3/envs/lerobot/bin/python \
+  scripts/run_single_invocation.py \
+  --manifest /absolute/path/to/connected-g1-run-manifest.json \
+  --connected-g1
+```
+
+The connected readiness adapter first discovers and validates one G1 state
+sample and one sample from each BrainCo hand, receives and validates a frame
+from every physical camera source, then checks the configured command topics
+for active publishers. The recorder repeats the source checks and, once it reports
+`read_only_recorder_ready`, atomically writes `live-observation.json`. That
+snapshot contains the current G1 state, both BrainCo states, byte-exact JPEG
+payloads from three physical cameras, and the four logical-view mapping. The
+candidate's normal sandboxed preprocessing and inference then consume this
+snapshot rather than the saved offline observation. The terminal report labels
+the two roles separately as `candidate_input_observation` and
+`saved_candidate_observation`.
+
+The terminal report is published at
+`<output_root>/<run_id>/terminal-report.json`. Confirm all of the following
+before treating the gate as passed:
+
+- `environment` is `connected-g1`;
+- `command_publishers_created` and `writes` are both `0` in the terminal
+  report and every adapter artifact;
+- `readiness-result.json` reports three physical sources, four logical views,
+  and `competing_command_publishers: 0`;
+- `live_observation`, `candidate_input_observation`,
+  `saved_candidate_observation`, and `invocation_evidence` appear in
+  `artifacts` with SHA-256 values;
+- evidence finalization and the multimodal assessment exist. A natural
+  zero-write capture may correctly conclude `indeterminate`.
+
+On any failed readiness, recorder handshake, candidate admission, evidence, or
+evaluation stage, preserve the published terminal report and its partial
+diagnostic artifacts. Do not retry with a robot action, enable a publisher, or
+perform automatic reset. Attach the resulting report path, evidence-manifest
+digest, and operator's independent conclusion to Issue #26; do not close or
+alter parent Issue #20.
+
+After the operator has checked the raw panels and report, post the exact run
+record without closing either issue:
+
+```bash
+REPORT=/absolute/output-root/RUN-ID/terminal-report.json
+EVIDENCE=/absolute/output-root/RUN-ID/evidence/INVOCATION-ID/sha256.txt
+gh issue comment 26 --repo v6582374-netizen/Shaka --body \
+  "Connected-G1 zero-write acceptance: $(jq -r .terminal_reason "$REPORT");
+terminal report: $REPORT ($(sha256sum "$REPORT" | cut -d' ' -f1));
+evidence manifest: $EVIDENCE ($(sha256sum "$EVIDENCE" | cut -d' ' -f1));
+operator conclusion: <succeeded|failed|indeterminate|aborted|abstained and rationale>."
 ```
 
 The runner validates every referenced artifact before starting the recorder. It

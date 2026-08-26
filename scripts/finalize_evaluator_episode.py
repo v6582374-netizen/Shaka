@@ -43,7 +43,9 @@ def _json_stdout_events(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _controller_time_bounds(trace: dict[str, Any]) -> tuple[int, int, int]:
+def _controller_time_bounds(
+    trace: dict[str, Any], local_minus_g1_clock_offset_ns: int | None = None
+) -> tuple[int, int, int]:
     frames = trace.get("frames")
     if not isinstance(frames, list) or not frames:
         raise ValueError("controller trace has no frames")
@@ -61,6 +63,17 @@ def _controller_time_bounds(trace: dict[str, Any]) -> tuple[int, int, int]:
         )
     if not offsets:
         raise ValueError("controller trace has no fresh ACT clock anchors")
+    if trace.get("loop_clock_id") == "local_utc_ns":
+        if (
+            not isinstance(local_minus_g1_clock_offset_ns, int)
+            or isinstance(local_minus_g1_clock_offset_ns, bool)
+        ):
+            raise ValueError("local controller trace requires a G1 clock offset")
+        return (
+            int(frames[0]["loop_now_ns"]) - local_minus_g1_clock_offset_ns,
+            int(frames[-1]["loop_now_ns"]) - local_minus_g1_clock_offset_ns,
+            -local_minus_g1_clock_offset_ns,
+        )
     offset_ns = round(statistics.median(offsets))
     return (
         int(frames[0]["loop_now_ns"]) + offset_ns,
@@ -131,8 +144,8 @@ def finalize(
     if final_event.get("trace_artifact") != str(controller_trace):
         raise ValueError("controller stdout did not identify the supplied trace")
 
-    controller_start_ns, controller_end_ns, clock_offset_ns = (
-        _controller_time_bounds(trace)
+    controller_start_ns, controller_end_ns, clock_offset_ns = _controller_time_bounds(
+        trace, metadata.get("local_minus_g1_clock_offset_ns")
     )
     stream_bounds = _camera_bounds(episode_directory / "camera_timestamps.csv")
     stream_bounds["robot_state"] = _state_bounds(

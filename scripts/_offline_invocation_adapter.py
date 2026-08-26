@@ -456,6 +456,7 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "schema_version": 1,
                 "protocol": "shaka.offline-controller-trace.v1",
+                "loop_clock_id": "local_utc_ns",
                 "outcome": "running",
                 "checkpoint_digest": package_sha256,
                 "frames": [

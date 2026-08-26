@@ -264,7 +264,9 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         )
         return manifest
 
-    def run_cli(self, root: Path, manifest: Path) -> subprocess.CompletedProcess[str]:
+    def run_cli(
+        self, root: Path, manifest: Path, *extra_arguments: str
+    ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update(
             {
@@ -278,12 +280,42 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             }
         )
         return subprocess.run(
-            [sys.executable, str(SCRIPT), "--manifest", str(manifest)],
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--manifest",
+                str(manifest),
+                *extra_arguments,
+            ],
             env=environment,
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
+        )
+
+    def configure_connected_g1(self, manifest: Path) -> None:
+        content = json.loads(manifest.read_text())
+        content["connected_g1"] = {
+            "schema_version": 1,
+            "network_interface": "enp0s31f6",
+            "camera_host": "192.168.123.164",
+            "discovery_timeout_s": 1.0,
+            "command_topics": ["rt/lowcmd"],
+        }
+        manifest.write_text(
+            json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def allow_connected_g1_command_publisher(
+        self, manifest: Path, topic: str, participant_key: str
+    ) -> None:
+        content = json.loads(manifest.read_text())
+        content["connected_g1"]["allowed_command_publishers"] = [
+            {"topic": topic, "participant_key": participant_key}
+        ]
+        manifest.write_text(
+            json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
 
     def start_cli(self, root: Path, manifest: Path) -> subprocess.Popen[str]:
@@ -363,6 +395,7 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         self.assertEqual(report["robot_runtime_consumed_s"], 0)
         self.assertEqual(report["command_publishers_created"], 0)
         self.assertEqual(report["writes"], 0)
+        self.assertIn("invocation_evidence", report["artifacts"])
         candidate_result = json.loads(
             (run_directory / "artifacts" / "candidate-result.json").read_text()
         )
@@ -372,6 +405,20 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         self.assertEqual(len(candidate_result["candidate_output_sha256"]), 64)
         self.assertEqual(candidate_result["command_publishers_created"], 0)
         self.assertEqual(candidate_result["writes"], 0)
+        recorder_events = [
+            json.loads(line)["event"]
+            for line in (run_directory / "artifacts" / "recorder-stdout.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        self.assertEqual(
+            recorder_events,
+            [
+                "read_only_recorder_ready",
+                "read_only_recorder_stop_requested",
+                "read_only_recorder_completed",
+            ],
+        )
         if reported_publishers is not None:
             self.assertEqual(
                 candidate_result["diagnostics"]["candidate_reported_command_publishers_created"],
@@ -437,6 +484,8 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             self.assertEqual(report["next_disposition"], "stop_zero_write_validation")
             self.assertEqual(report["command_publishers_created"], 0)
             self.assertEqual(report["writes"], 0)
+            self.assertEqual(report["physical_rollout_attempts_consumed"], 0)
+            self.assertEqual(report["robot_runtime_consumed_s"], 0)
             manifest_content = json.loads(manifest.read_text())
             self.assertEqual(
                 report["artifacts"]["candidate_package"]["sha256"],
@@ -534,6 +583,223 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             for event in adapter_audit:
                 self.assertEqual(event["command_publishers_created"], 0)
                 self.assertEqual(event["writes"], 0)
+
+    def test_connected_g1_cli_admits_a_recorder_snapshot_not_saved_observation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+
+            completed = self.run_cli(root, manifest, "--connected-g1")
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            run_directory = root / "runs" / "RUN-001"
+            report = json.loads((run_directory / "terminal-report.json").read_text())
+            self.assertEqual(report["environment"], "connected-g1")
+            self.assertEqual(report["command_publishers_created"], 0)
+            self.assertEqual(report["writes"], 0)
+            self.assertEqual(report["physical_rollout_attempts_consumed"], 0)
+            self.assertEqual(report["robot_runtime_consumed_s"], 0)
+            snapshot = report["artifacts"]["live_observation"]
+            candidate_input = report["artifacts"]["candidate_input_observation"]
+            saved_observation = report["artifacts"]["saved_candidate_observation"]
+            self.assertEqual(candidate_input["sha256"], snapshot["sha256"])
+            self.assertNotEqual(saved_observation["sha256"], snapshot["sha256"])
+            live_observation = json.loads((run_directory / snapshot["path"]).read_text())
+            self.assertEqual(live_observation["source"], "connected-g1-recorder-v1")
+            self.assertEqual(
+                set(live_observation["logical_views"]),
+                {
+                    "cam_left_high",
+                    "cam_right_high",
+                    "left_wrist_camera",
+                    "right_wrist_camera",
+                },
+            )
+            candidate_result = json.loads(
+                (run_directory / "artifacts" / "candidate-result.json").read_text()
+            )
+            self.assertEqual(
+                candidate_result["input_observation_sha256"], snapshot["sha256"]
+            )
+            self.assertNotEqual(
+                candidate_result["input_observation_sha256"],
+                json.loads(manifest.read_text())["candidate"]["observation"]["sha256"],
+            )
+            readiness = json.loads(
+                (run_directory / "artifacts" / "readiness-result.json").read_text()
+            )
+            self.assertEqual(readiness["environment"], "connected-g1")
+            self.assertEqual(readiness["competing_command_publishers"], 0)
+            self.assertEqual(readiness["physical_camera_sources"], 3)
+            self.assertEqual(readiness["logical_camera_views"], 4)
+            adapter_audit = [
+                json.loads(line)
+                for line in (run_directory / "artifacts" / "adapter-audit.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            self.assertTrue(adapter_audit)
+            for event in adapter_audit:
+                self.assertEqual(event["command_publishers_created"], 0)
+                self.assertEqual(event["writes"], 0)
+
+    def test_connected_g1_rejects_a_competing_command_publisher_before_recording(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+            previous_publisher = os.environ.get("SHAKA_FAKE_COMMAND_PUBLISHER")
+            os.environ["SHAKA_FAKE_COMMAND_PUBLISHER"] = "rt/lowcmd"
+            try:
+                completed = self.run_cli(root, manifest, "--connected-g1")
+            finally:
+                if previous_publisher is None:
+                    os.environ.pop("SHAKA_FAKE_COMMAND_PUBLISHER", None)
+                else:
+                    os.environ["SHAKA_FAKE_COMMAND_PUBLISHER"] = previous_publisher
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertIn("competing command publishers", result["reason"])
+            report = json.loads(
+                (root / "runs" / "RUN-001" / "terminal-report.json").read_text()
+            )
+            self.assertEqual(report["environment"], "connected-g1")
+            self.assertEqual(report["completed_stage"], "invocation_authority_acquired")
+            self.assertFalse(
+                (root / "runs" / "RUN-001" / "artifacts" / "recorder-stdout.jsonl").exists()
+            )
+
+    def test_connected_g1_allows_the_manifest_bound_unique_control_entry(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+            participant_key = "00000000-0000-0000-0000-000000000001"
+            self.allow_connected_g1_command_publisher(
+                manifest, "rt/lowcmd", participant_key
+            )
+            previous_publisher = os.environ.get("SHAKA_FAKE_COMMAND_PUBLISHER")
+            os.environ["SHAKA_FAKE_COMMAND_PUBLISHER"] = "rt/lowcmd"
+            try:
+                completed = self.run_cli(root, manifest, "--connected-g1")
+            finally:
+                if previous_publisher is None:
+                    os.environ.pop("SHAKA_FAKE_COMMAND_PUBLISHER", None)
+                else:
+                    os.environ["SHAKA_FAKE_COMMAND_PUBLISHER"] = previous_publisher
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            readiness = json.loads(
+                (root / "runs" / "RUN-001" / "artifacts" / "readiness-result.json").read_text()
+            )
+            self.assertEqual(readiness["control_authority"], "verified_unique_control_entry")
+            self.assertEqual(
+                readiness["observed_command_publishers"],
+                [{"topic": "rt/lowcmd", "participant_key": participant_key}],
+            )
+
+    def test_connected_g1_rejects_multiple_allowed_control_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+            content = json.loads(manifest.read_text())
+            content["connected_g1"]["allowed_command_publishers"] = [
+                {
+                    "topic": "rt/lowcmd",
+                    "participant_key": "00000000-0000-0000-0000-000000000001",
+                },
+                {
+                    "topic": "rt/lowcmd",
+                    "participant_key": "00000000-0000-0000-0000-000000000002",
+                },
+            ]
+            manifest.write_text(json.dumps(content), encoding="utf-8")
+
+            completed = self.run_cli(root, manifest, "--connected-g1")
+
+            self.assertEqual(completed.returncode, 2)
+            result = json.loads(completed.stdout)
+            self.assertIn("one unique control entry", result["reason"])
+            self.assertFalse((root / "runs").exists())
+
+    def test_connected_g1_requires_a_readable_g1_state_before_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+            previous_value = os.environ.get("SHAKA_FAKE_PREFLIGHT_EMPTY")
+            os.environ["SHAKA_FAKE_PREFLIGHT_EMPTY"] = "1"
+            try:
+                completed = self.run_cli(root, manifest, "--connected-g1")
+            finally:
+                if previous_value is None:
+                    os.environ.pop("SHAKA_FAKE_PREFLIGHT_EMPTY", None)
+                else:
+                    os.environ["SHAKA_FAKE_PREFLIGHT_EMPTY"] = previous_value
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertIn("required DDS sample is absent", result["reason"])
+            report = json.loads(
+                (root / "runs" / "RUN-001" / "terminal-report.json").read_text()
+            )
+            self.assertEqual(report["completed_stage"], "invocation_authority_acquired")
+            self.assertFalse(
+                (root / "runs" / "RUN-001" / "artifacts" / "recorder-stdout.jsonl").exists()
+            )
+
+    def test_connected_g1_candidate_adapter_failure_releases_and_post_rolls(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+            previous_plan = os.environ.get("SHAKA_OFFLINE_ADAPTER_PLAN")
+            os.environ["SHAKA_OFFLINE_ADAPTER_PLAN"] = json.dumps(
+                {"candidate": {"failure": "simulated candidate adapter failure"}}
+            )
+            try:
+                completed = self.run_cli(root, manifest, "--connected-g1")
+            finally:
+                if previous_plan is None:
+                    os.environ.pop("SHAKA_OFFLINE_ADAPTER_PLAN", None)
+                else:
+                    os.environ["SHAKA_OFFLINE_ADAPTER_PLAN"] = previous_plan
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["result"], "zero_write_invocation_failed")
+            self.assertEqual(result["failure_class"], "runtime_failure")
+            self.assertIn("simulated candidate adapter failure", result["reason"])
+            run_directory = root / "runs" / "RUN-001"
+            report = json.loads((run_directory / "terminal-report.json").read_text())
+            self.assertEqual(report["environment"], "connected-g1")
+            self.assertEqual(report["completed_stage"], "control_released")
+            self.assertIn("invocation_evidence", report["artifacts"])
+            recorder_events = [
+                json.loads(line)["event"]
+                for line in (run_directory / "artifacts" / "recorder-stdout.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            self.assertEqual(
+                recorder_events,
+                [
+                    "read_only_recorder_ready",
+                    "read_only_recorder_stop_requested",
+                    "read_only_recorder_completed",
+                ],
+            )
 
     def test_rejects_unsupported_mode_before_starting_the_recorder(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

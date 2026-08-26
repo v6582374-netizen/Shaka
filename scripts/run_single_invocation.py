@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -26,6 +27,7 @@ IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 RECORDER = Path(__file__).with_name("record_evaluator_episode.py")
 ADAPTER = Path(__file__).with_name("_offline_invocation_adapter.py")
+CONNECTED_G1_ADAPTER = Path(__file__).with_name("_connected_g1_zero_write_adapter.py")
 SANDBOX = shutil.which("bwrap")
 TASK_RESULTS = frozenset(
     {"succeeded", "failed", "indeterminate", "aborted", "abstained"}
@@ -73,6 +75,15 @@ class VerifiedArtifact(VerifiedFile):
 
 
 @dataclass(frozen=True)
+class ConnectedG1:
+    network_interface: str
+    camera_host: str
+    discovery_timeout_s: float
+    command_topics: tuple[str, ...]
+    allowed_command_publishers: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class ValidatedManifest:
     path: Path
     sha256: str
@@ -93,6 +104,7 @@ class ValidatedManifest:
     post_roll_s: float
     minimum_camera_frames: int
     minimum_state_samples: int
+    connected_g1: ConnectedG1 | None
 
 
 @dataclass(frozen=True)
@@ -108,6 +120,8 @@ class RunPaths:
     candidate_bundle: Path
     candidate_runtime: Path
     candidate_observation: Path
+    saved_candidate_observation: Path
+    live_observation: Path
     safety_copy: Path
     budget_copy: Path
     evaluator_config: Path
@@ -129,6 +143,11 @@ class RunProgress:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument(
+        "--connected-g1",
+        action="store_true",
+        help="use the read-only connected-G1 admission path bound in the manifest",
+    )
     return parser.parse_args()
 
 
@@ -435,6 +454,67 @@ def _validate_budget(value: dict[str, Any]) -> None:
         raise ManifestError("budget artifact global_stop_reasons must be non-empty")
 
 
+def _connected_g1_configuration(value: Any) -> ConnectedG1 | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ManifestError("connected_g1 must be a schema_version 1 object")
+    network_interface = value.get("network_interface")
+    camera_host = value.get("camera_host")
+    discovery_timeout_s = value.get("discovery_timeout_s")
+    command_topics = value.get("command_topics")
+    allowed_command_publishers = value.get("allowed_command_publishers", [])
+    if not isinstance(network_interface, str) or not network_interface:
+        raise ManifestError("connected_g1 network_interface must be non-empty")
+    if not isinstance(camera_host, str) or not camera_host:
+        raise ManifestError("connected_g1 camera_host must be non-empty")
+    if (
+        not isinstance(discovery_timeout_s, (int, float))
+        or isinstance(discovery_timeout_s, bool)
+        or discovery_timeout_s <= 0
+    ):
+        raise ManifestError("connected_g1 discovery_timeout_s must be positive")
+    if (
+        not isinstance(command_topics, list)
+        or not command_topics
+        or any(not isinstance(topic, str) or not topic for topic in command_topics)
+        or len(set(command_topics)) != len(command_topics)
+    ):
+        raise ManifestError("connected_g1 command_topics must be non-empty and unique")
+    if not isinstance(allowed_command_publishers, list):
+        raise ManifestError("connected_g1 allowed_command_publishers must be a list")
+    allowed: list[tuple[str, str]] = []
+    for publisher in allowed_command_publishers:
+        if not isinstance(publisher, dict):
+            raise ManifestError("allowed command publisher must be an object")
+        topic = publisher.get("topic")
+        participant_key = publisher.get("participant_key")
+        if not isinstance(topic, str) or topic not in command_topics:
+            raise ManifestError(
+                "allowed command publisher topic must be a protected command topic"
+            )
+        if not isinstance(participant_key, str):
+            raise ManifestError("allowed command publisher key must be a UUID")
+        try:
+            canonical_key = str(uuid.UUID(participant_key))
+        except ValueError as error:
+            raise ManifestError("allowed command publisher key must be a UUID") from error
+        allowed.append((topic, canonical_key))
+    if len(set(allowed)) != len(allowed):
+        raise ManifestError("allowed command publishers must be unique")
+    if len({participant_key for _, participant_key in allowed}) > 1:
+        raise ManifestError(
+            "allowed command publishers must identify one unique control entry"
+        )
+    return ConnectedG1(
+        network_interface=network_interface,
+        camera_host=camera_host,
+        discovery_timeout_s=float(discovery_timeout_s),
+        command_topics=tuple(command_topics),
+        allowed_command_publishers=tuple(allowed),
+    )
+
+
 def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     manifest_path = manifest_path.resolve()
     if SANDBOX is None:
@@ -447,6 +527,7 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     invocation_id = _identity(manifest, "invocation_id")
     if _required_string(manifest, "execution_mode") != "zero-write":
         raise ManifestError("only the 'zero-write' execution mode is supported")
+    connected_g1 = _connected_g1_configuration(manifest.get("connected_g1"))
 
     for name in (
         "task_contract_version",
@@ -572,6 +653,7 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         post_roll_s=float(post_roll_s),
         minimum_camera_frames=minimum_camera_frames,
         minimum_state_samples=minimum_state_samples,
+        connected_g1=connected_g1,
     )
 
 
@@ -637,6 +719,7 @@ def _read_process_event(
 
 
 def _run_adapter(
+    adapter_path: Path,
     adapter: str,
     arguments: list[str],
     output_path: Path,
@@ -646,7 +729,7 @@ def _run_adapter(
     environment = os.environ.copy()
     environment["SHAKA_INVOCATION_ADAPTER_AUDIT"] = str(paths.adapter_audit)
     completed = subprocess.run(
-        [sys.executable, str(ADAPTER), adapter, *arguments],
+        [sys.executable, str(adapter_path), adapter, *arguments],
         env=environment,
         capture_output=True,
         text=True,
@@ -679,7 +762,9 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
         "run_manifest": paths.manifest_copy,
         "candidate_package": paths.candidate_copy,
         "candidate_runtime": paths.candidate_runtime,
-        "candidate_observation": paths.candidate_observation,
+        "saved_candidate_observation": paths.saved_candidate_observation,
+        "candidate_input_observation": paths.candidate_observation,
+        "live_observation": paths.live_observation,
         "safety_configuration": paths.safety_copy,
         "budget_artifact": paths.budget_copy,
         "evaluator_configuration": paths.evaluator_config,
@@ -761,6 +846,7 @@ def _terminal_report(
     terminal_reason: str,
     task_result: str | None,
     include_task_result: bool = True,
+    environment: str = "offline",
     **values: Any,
 ) -> dict[str, Any]:
     report = {
@@ -768,12 +854,17 @@ def _terminal_report(
         "run_id": manifest.run_id,
         "invocation_id": manifest.invocation_id,
         "execution_mode": "zero-write",
+        "environment": environment,
         "manifest_sha256": manifest.sha256,
         "completed_stage": completed_stage,
         "terminal_reason": terminal_reason,
         "next_disposition": "stop_zero_write_validation",
         "command_publishers_created": values.pop("command_publishers_created", 0),
         "writes": values.pop("writes", 0),
+        "physical_rollout_attempts_consumed": values.pop(
+            "physical_rollout_attempts_consumed", 0
+        ),
+        "robot_runtime_consumed_s": values.pop("robot_runtime_consumed_s", 0),
         "artifacts": _existing_artifacts(paths),
         **values,
     }
@@ -790,6 +881,7 @@ def _publish_failure(
     paths: RunPaths,
     progress: RunProgress,
     error: BaseException,
+    environment: str,
 ) -> NoReturn:
     reason = str(error) or type(error).__name__
     deployment_result = error.result if isinstance(error, DeploymentDefect) else None
@@ -811,6 +903,7 @@ def _publish_failure(
             else "aborted"
         ),
         include_task_result=deployment_result is None,
+        environment=environment,
         failure_class="deployment_defect" if deployment_result is not None else "runtime_failure",
         physical_rollout_attempts_consumed=0,
         robot_runtime_consumed_s=0,
@@ -868,6 +961,8 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         candidate_bundle=artifacts / "candidate-bundle",
         candidate_runtime=artifacts / "candidate-runtime.json",
         candidate_observation=artifacts / "candidate-observation.json",
+        saved_candidate_observation=artifacts / "saved-candidate-observation.json",
+        live_observation=artifacts / "live-observation.json",
         safety_copy=artifacts / "safety-configuration.json",
         budget_copy=artifacts / "budget-artifact.json",
         evaluator_config=artifacts / "evaluator" / "evaluator.json",
@@ -908,6 +1003,7 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
             },
         )
         paths.candidate_observation.write_bytes(manifest.candidate_observation.content)
+        paths.saved_candidate_observation.write_bytes(manifest.candidate_observation.content)
         paths.safety_copy.write_bytes(manifest.safety_config.content)
         paths.budget_copy.write_bytes(manifest.budget_artifact.content)
         paths.evaluator_config.parent.mkdir()
@@ -935,7 +1031,7 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
 
 
 def _start_recorder(
-    manifest: ValidatedManifest, paths: RunPaths
+    manifest: ValidatedManifest, paths: RunPaths, connected_g1: bool
 ) -> subprocess.Popen[str]:
     command = [
         sys.executable,
@@ -954,6 +1050,20 @@ def _start_recorder(
         str(manifest.minimum_state_samples),
         "--lifecycle-handshake",
     ]
+    if connected_g1:
+        assert manifest.connected_g1 is not None
+        command.extend(
+            [
+                "--network-interface",
+                manifest.connected_g1.network_interface,
+                "--camera-host",
+                manifest.connected_g1.camera_host,
+                "--discovery-timeout-s",
+                str(manifest.connected_g1.discovery_timeout_s),
+                "--live-observation-output",
+                str(paths.live_observation),
+            ]
+        )
     return subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -969,8 +1079,25 @@ def _interrupt_invocation(signum: int, frame: Any) -> NoReturn:
     raise InvocationInterrupted(f"invocation interrupted by {signal_name}")
 
 
-def run(manifest_path: Path) -> dict[str, Any]:
+def _wait_for_live_observation(path: Path, deadline: float) -> None:
+    while not path.is_file():
+        _remaining(deadline)
+        time.sleep(0.01)
+    value, _ = _read_object(path, "live observation")
+    if (
+        value.get("schema_version") != 1
+        or value.get("source") != "connected-g1-recorder-v1"
+        or not isinstance(value.get("captured_at_ns"), int)
+    ):
+        raise RuntimeError("recorder live observation is invalid")
+
+
+def run(manifest_path: Path, *, connected_g1: bool = False) -> dict[str, Any]:
     manifest = _validate_manifest(manifest_path)
+    if connected_g1 and manifest.connected_g1 is None:
+        raise ManifestError("connected-g1 requires a connected_g1 manifest configuration")
+    adapter_path = CONNECTED_G1_ADAPTER if connected_g1 else ADAPTER
+    environment = "connected-g1" if connected_g1 else "offline"
     paths: RunPaths | None = None
     progress: RunProgress | None = None
     recorder: subprocess.Popen[str] | None = None
@@ -988,14 +1115,34 @@ def run(manifest_path: Path) -> dict[str, Any]:
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, previous_signal_mask)
         deadline = time.monotonic() + manifest.maximum_duration_s
+        readiness_arguments = [
+            "--claim-directory",
+            str(paths.claim),
+            "--execution-mode",
+            "zero-write",
+        ]
+        if connected_g1:
+            assert manifest.connected_g1 is not None
+            readiness_arguments.extend(
+                [
+                    "--network-interface",
+                    manifest.connected_g1.network_interface,
+                    "--camera-host",
+                    manifest.connected_g1.camera_host,
+                    "--discovery-timeout-s",
+                    str(manifest.connected_g1.discovery_timeout_s),
+                ]
+            )
+            for topic in manifest.connected_g1.command_topics:
+                readiness_arguments.extend(["--command-topic", topic])
+            for topic, participant_key in manifest.connected_g1.allowed_command_publishers:
+                readiness_arguments.extend(
+                    ["--allowed-command-publisher", f"{topic}:{participant_key}"]
+                )
         readiness = _run_adapter(
+            adapter_path,
             "readiness",
-            [
-                "--claim-directory",
-                str(paths.claim),
-                "--execution-mode",
-                "zero-write",
-            ],
+            readiness_arguments,
             paths.artifacts / "readiness-result.json",
             paths,
             deadline,
@@ -1004,7 +1151,8 @@ def run(manifest_path: Path) -> dict[str, Any]:
             raise RuntimeError("readiness adapter did not establish readiness")
         _complete_stage(paths, progress, "readiness_confirmed")
 
-        recorder = _start_recorder(manifest, paths)
+        recorder = _start_recorder(manifest, paths, connected_g1)
+        candidate_failure: Exception | None = None
         with paths.recorder_transcript.open("w", encoding="utf-8") as transcript:
             while True:
                 event = _read_process_event(recorder, deadline, transcript)
@@ -1015,9 +1163,14 @@ def run(manifest_path: Path) -> dict[str, Any]:
                         f"recorder failed before ready: {event.get('reason')}"
                     )
             _complete_stage(paths, progress, "recorder_ready")
+            if connected_g1:
+                _wait_for_live_observation(paths.live_observation, deadline)
+                paths.candidate_observation.write_bytes(paths.live_observation.read_bytes())
+                _complete_stage(paths, progress, "live_observation_captured")
 
             try:
                 candidate_result = _run_adapter(
+                    adapter_path,
                     "candidate",
                     [
                         "--runtime-package",
@@ -1035,10 +1188,34 @@ def run(manifest_path: Path) -> dict[str, Any]:
                     paths,
                     deadline,
                 )
-            except DeploymentDefect:
+            except Exception as error:  # noqa: BLE001
+                candidate_failure = error
+            else:
+                if candidate_result.get("candidate_id") != manifest.candidate_id:
+                    candidate_failure = RuntimeError(
+                        "candidate adapter returned the wrong identity"
+                    )
+                elif candidate_result.get("deployment_status") != "admitted":
+                    candidate_failure = RuntimeError(
+                        "candidate deployment did not complete"
+                    )
+                else:
+                    _complete_stage(paths, progress, "candidate_completed")
+
+            try:
                 release = _run_adapter(
+                    adapter_path,
                     "release",
-                    [],
+                    (
+                        []
+                        if candidate_failure is not None
+                        else [
+                            "--controller-trace",
+                            str(paths.controller_trace),
+                            "--controller-stdout",
+                            str(paths.controller_stdout),
+                        ]
+                    ),
                     paths.artifacts / "control-release.json",
                     paths,
                     deadline,
@@ -1048,42 +1225,23 @@ def run(manifest_path: Path) -> dict[str, Any]:
                         "control release adapter did not release authority"
                     )
                 _complete_stage(paths, progress, "control_released")
-                raise
-            if candidate_result.get("candidate_id") != manifest.candidate_id:
-                raise RuntimeError("candidate adapter returned the wrong identity")
-            if candidate_result.get("deployment_status") != "admitted":
-                raise RuntimeError("candidate deployment did not complete")
-            _complete_stage(paths, progress, "candidate_completed")
-
-            release = _run_adapter(
-                "release",
-                [
-                    "--controller-trace",
-                    str(paths.controller_trace),
-                    "--controller-stdout",
-                    str(paths.controller_stdout),
-                ],
-                paths.artifacts / "control-release.json",
-                paths,
-                deadline,
-            )
-            if release.get("released") is not True:
-                raise RuntimeError("control release adapter did not release authority")
-            _complete_stage(paths, progress, "control_released")
-
-            recorder.terminate()
-            while True:
-                event = _read_process_event(recorder, deadline, transcript)
-                if event.get("event") == "read_only_recorder_completed":
-                    break
-                if event.get("event") == "read_only_recorder_failed":
-                    raise RuntimeError(
-                        f"recorder failed after stop: {event.get('reason')}"
-                    )
+            finally:
+                if recorder.poll() is None:
+                    recorder.terminate()
+                while True:
+                    event = _read_process_event(recorder, deadline, transcript)
+                    if event.get("event") == "read_only_recorder_completed":
+                        break
+                    if event.get("event") == "read_only_recorder_failed":
+                        raise RuntimeError(
+                            f"recorder failed after stop: {event.get('reason')}"
+                        )
         recorder.wait(timeout=_remaining(deadline))
         if recorder.returncode != 0:
             stderr = recorder.stderr.read() if recorder.stderr is not None else ""
             raise RuntimeError(f"recorder exited with {recorder.returncode}: {stderr}")
+        if candidate_failure is not None:
+            raise candidate_failure
 
         evidence_directory = paths.evidence_root / manifest.invocation_id
         finalization = finalize_invocation_evidence(
@@ -1097,6 +1255,7 @@ def run(manifest_path: Path) -> dict[str, Any]:
 
         try:
             evaluation = _run_adapter(
+                adapter_path,
                 "evaluation",
                 [
                     "--evidence-directory",
@@ -1122,6 +1281,7 @@ def run(manifest_path: Path) -> dict[str, Any]:
         _complete_stage(paths, progress, "evaluation_completed")
 
         reset = _run_adapter(
+            adapter_path,
             "reset",
             ["--execution-mode", "zero-write", "--task-result", str(task_result)],
             paths.artifacts / "reset-result.json",
@@ -1139,6 +1299,7 @@ def run(manifest_path: Path) -> dict[str, Any]:
             completed_stage="terminal_report",
             terminal_reason="zero_write_invocation_completed",
             task_result=str(task_result),
+            environment=environment,
         )
         _write_json(paths.partial / "terminal-report.json", report)
         result = {
@@ -1159,7 +1320,7 @@ def run(manifest_path: Path) -> dict[str, Any]:
         if recorder is not None and recorder.poll() is None:
             recorder.kill()
             recorder.wait()
-        _publish_failure(manifest, paths, progress, error)
+        _publish_failure(manifest, paths, progress, error, environment)
     finally:
         if recorder is not None and recorder.poll() is None:
             recorder.kill()
@@ -1171,7 +1332,7 @@ def run(manifest_path: Path) -> dict[str, Any]:
 def main() -> int:
     args = parse_args()
     try:
-        result = run(args.manifest)
+        result = run(args.manifest, connected_g1=args.connected_g1)
     except InvocationFailed as error:
         print(json.dumps(error.result, sort_keys=True), flush=True)
         return 2

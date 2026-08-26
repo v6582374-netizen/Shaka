@@ -10,6 +10,7 @@ not depend on a video re-encode.
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import hashlib
 import json
@@ -85,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discovery-timeout-s", type=float, default=8.0)
     parser.add_argument("--minimum-camera-frames", type=int, default=30)
     parser.add_argument("--minimum-state-samples", type=int, default=30)
+    parser.add_argument("--live-observation-output", type=Path)
     return parser.parse_args()
 
 
@@ -230,6 +232,50 @@ def _write_sha256_manifest(directory: Path) -> None:
     (directory / "sha256.txt").write_text("\n".join(entries) + "\n", encoding="utf-8")
 
 
+def _write_live_observation(
+    path: Path,
+    episode_id: str,
+    state: dict[str, Any],
+    hands: dict[str, dict[str, list[float]]],
+    frames: dict[str, CameraFrame],
+) -> None:
+    required_cameras = {spec.camera_id for spec in CAMERAS}
+    if set(frames) != required_cameras or set(hands) != {"left", "right"}:
+        raise RuntimeError("live observation sources are incomplete")
+    captured_at_ns = state.get("assembled_time_ns")
+    if not isinstance(captured_at_ns, int) or captured_at_ns < 0:
+        raise ValueError("state envelope timestamp is invalid for live observation")
+    physical_frames = {
+        camera_id: {
+            "sequence": frame.sequence,
+            "frame_time_ns": frame.frame_time_ns,
+            "payload_sha256": frame.payload_sha256,
+            "jpeg_base64": base64.b64encode(frame.payload).decode("ascii"),
+        }
+        for camera_id, frame in sorted(frames.items())
+    }
+    value = {
+        "schema_version": 1,
+        "source": "connected-g1-recorder-v1",
+        "observation_id": f"{episode_id}-live",
+        "captured_at_ns": captured_at_ns,
+        "robot_state": state,
+        "brainco": hands,
+        "physical_camera_frames": physical_frames,
+        "logical_views": {
+            "cam_left_high": "head_camera",
+            "cam_right_high": "head_camera",
+            "left_wrist_camera": "left_wrist_camera",
+            "right_wrist_camera": "right_wrist_camera",
+        },
+    }
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    os.replace(temporary, path)
+
+
 def _json_line(stream: Any, value: dict[str, Any]) -> None:
     stream.write(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
     stream.flush()
@@ -327,6 +373,9 @@ def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str,
             tuple[float, ...],
         ]
     ] = []
+    latest_state: dict[str, Any] | None = None
+    latest_hands: dict[str, dict[str, list[float]]] = {}
+    latest_frames: dict[str, CameraFrame] = {}
     stop = threading.Event()
     external_stop_requested = threading.Event()
     sample_queue: queue.SimpleQueue[tuple[str, int, Any]] = queue.SimpleQueue()
@@ -486,6 +535,7 @@ def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str,
                     first_camera_sequences.setdefault(spec.camera_id, frame.sequence)
                     last_camera_sequences[spec.camera_id] = frame.sequence
                     counts[spec.camera_id] += 1
+                    latest_frames[spec.camera_id] = frame
 
                 while True:
                     try:
@@ -509,6 +559,7 @@ def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str,
                             },
                         )
                         state_sequences.append(sequence)
+                        latest_state = payload
                         clock_offset_samples_ns.append(
                             received_time_ns - int(payload["assembled_time_ns"])
                         )
@@ -527,12 +578,30 @@ def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str,
                                 currents,
                             )
                         )
+                        latest_hands[side] = {
+                            "positions": list(positions),
+                            "velocities": list(velocities),
+                            "currents": list(currents),
+                        }
                         counts[f"{side}_hand"] += 1
 
                 if not reader_errors.empty():
                     raise RuntimeError(reader_errors.get())
 
                 if not lifecycle.ready and _sources_available(counts):
+                    live_observation_output = getattr(
+                        args, "live_observation_output", None
+                    )
+                    if live_observation_output is not None:
+                        if latest_state is None:
+                            raise RuntimeError("live observation is missing G1 state")
+                        _write_live_observation(
+                            live_observation_output.resolve(),
+                            episode_id,
+                            latest_state,
+                            latest_hands,
+                            latest_frames,
+                        )
                     lifecycle.ready = True
                     lifecycle.phase = "recording"
                     lifecycle.event("read_only_recorder_ready")
