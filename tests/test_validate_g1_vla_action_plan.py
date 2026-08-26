@@ -16,9 +16,10 @@ SPEC.loader.exec_module(VALIDATOR)
 ARM_JOINTS = [f"arm_{index}" for index in range(14)]
 
 
-def write_urdf(path: Path) -> None:
+def write_urdf(path: Path, *, velocity: float | None = None) -> None:
+    velocity_attribute = "" if velocity is None else f' velocity="{velocity}"'
     joints = "\n".join(
-        f'<joint name="{name}"><limit lower="-1" upper="1" /></joint>'
+        f'<joint name="{name}"><limit lower="-1" upper="1"{velocity_attribute} /></joint>'
         for name in ARM_JOINTS
     )
     path.write_text(f"<robot>{joints}</robot>", encoding="utf-8")
@@ -48,6 +49,18 @@ def plan() -> dict[str, object]:
 
 def standard_start() -> dict[str, object]:
     return {"pose": {"arm_joint_order": ARM_JOINTS, "arm_values": [0.0] * 14}}
+
+
+def training_time_audit() -> dict[str, object]:
+    return {
+        "protocol": VALIDATOR.TRAINING_TIME_PROTOCOL,
+        "result": "brainco26_training_time_audit_ok",
+        "physical_execution_authorized": False,
+        "training_time_semantics": {
+            "action_horizon_steps": 25,
+            "sample_interval_seconds": 1 / 30,
+        },
+    }
 
 
 class G1VlaActionPlanValidatorTest(unittest.TestCase):
@@ -86,3 +99,18 @@ class G1VlaActionPlanValidatorTest(unittest.TestCase):
         self.assertEqual(result["result"], "g1_vla_action_plan_rejected")
         self.assertEqual(result["violations"][0]["kind"], "arm_hard_limit")
         self.assertEqual(result["violations"][0]["joint"], "arm_3")
+
+    def test_rejects_adjacent_arm_targets_faster_than_the_urdf_velocity_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            urdf = Path(directory) / "g1.urdf"
+            write_urdf(urdf, velocity=1.0)
+            unsafe = plan()
+            unsafe["trajectory"][1][0] = 0.2  # type: ignore[index]
+            result = VALIDATOR.validate(
+                unsafe, observation(), standard_start(), urdf, training_time_audit()
+            )
+
+        self.assertEqual(result["result"], "g1_vla_action_plan_rejected")
+        self.assertEqual(result["violations"][0]["kind"], "arm_urdf_velocity_limit")
+        self.assertAlmostEqual(result["violations"][0]["implied_velocity"], 3.0)
+        self.assertEqual(result["inputs"]["training_sample_interval_seconds"], 1 / 30)

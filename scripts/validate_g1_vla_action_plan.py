@@ -22,6 +22,7 @@ from xml.etree import ElementTree
 
 
 PROTOCOL = "shaka.g1-vla-action-plan-static-admission.v1"
+TRAINING_TIME_PROTOCOL = "shaka.brainco26-training-time-audit.v1"
 PLAN_SCHEMA_VERSION = 1
 ACTION_DIMENSION = 26
 ACTION_HORIZON = 25
@@ -126,8 +127,57 @@ def _arm_limits(urdf: Path, joint_order: tuple[str, ...]) -> tuple[tuple[float, 
     return tuple(limits)
 
 
+def _arm_velocity_limits(urdf: Path, joint_order: tuple[str, ...]) -> tuple[float, ...]:
+    """Read URDF joint speed hard limits for an already-bound training cadence."""
+    try:
+        root = ElementTree.parse(urdf).getroot()
+    except (OSError, ElementTree.ParseError) as error:
+        raise ValueError(f"G1 URDF is unreadable: {error}") from error
+    raw = {
+        str(joint.get("name")): joint.find("limit")
+        for joint in root.findall("joint")
+        if joint.get("name") is not None
+    }
+    limits: list[float] = []
+    for name in joint_order:
+        limit = raw.get(name)
+        if limit is None:
+            raise ValueError(f"G1 URDF lacks a velocity limit for {name}")
+        try:
+            value = float(limit.attrib["velocity"])
+        except (KeyError, ValueError) as error:
+            raise ValueError(f"G1 URDF velocity limit for {name} is invalid") from error
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"G1 URDF velocity limit for {name} is invalid")
+        limits.append(value)
+    return tuple(limits)
+
+
+def _training_sample_interval(audit: dict[str, Any]) -> float:
+    semantics = audit.get("training_time_semantics")
+    if (
+        audit.get("result") != "brainco26_training_time_audit_ok"
+        or audit.get("protocol") != TRAINING_TIME_PROTOCOL
+        or audit.get("physical_execution_authorized") is not False
+        or not isinstance(semantics, dict)
+        or semantics.get("action_horizon_steps") != ACTION_HORIZON
+    ):
+        raise ValueError("training-time audit does not declare the fixed zero-write BrainCo26 contract")
+    try:
+        interval = float(semantics["sample_interval_seconds"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("training-time audit lacks a valid sample interval") from error
+    if not math.isfinite(interval) or interval <= 0.0:
+        raise ValueError("training-time audit has an invalid sample interval")
+    return interval
+
+
 def validate(
-    plan: dict[str, Any], observation: dict[str, Any], standard_start: dict[str, Any], urdf: Path
+    plan: dict[str, Any],
+    observation: dict[str, Any],
+    standard_start: dict[str, Any],
+    urdf: Path,
+    training_time_audit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     trajectory = _trajectory(plan)
     live_state = _live_state(observation)
@@ -142,6 +192,14 @@ def validate(
         raise ValueError("standard-start arm-joint order is not unique")
     standard_arm = _vector(pose.get("arm_values"), ARM_DIMENSION, "standard-start arm pose")
     limits = _arm_limits(urdf, joint_order)
+    sample_interval = (
+        _training_sample_interval(training_time_audit)
+        if training_time_audit is not None
+        else None
+    )
+    velocity_limits = (
+        _arm_velocity_limits(urdf, joint_order) if sample_interval is not None else None
+    )
     violations: list[dict[str, Any]] = []
     for target_index, target in enumerate(trajectory):
         for joint_index, (value, (lower, upper)) in enumerate(
@@ -171,6 +229,31 @@ def validate(
                         "upper": 1.0,
                     }
                 )
+    if sample_interval is not None and velocity_limits is not None:
+        for target_index, (previous, current) in enumerate(
+            zip(trajectory, trajectory[1:]), start=1
+        ):
+            for joint_index, (previous_value, current_value, velocity_limit) in enumerate(
+                zip(
+                    previous[:ARM_DIMENSION],
+                    current[:ARM_DIMENSION],
+                    velocity_limits,
+                    strict=True,
+                )
+            ):
+                implied_velocity = abs(current_value - previous_value) / sample_interval
+                if implied_velocity > velocity_limit:
+                    violations.append(
+                        {
+                            "kind": "arm_urdf_velocity_limit",
+                            "target_index": target_index,
+                            "joint_index": joint_index,
+                            "joint": joint_order[joint_index],
+                            "implied_velocity": implied_velocity,
+                            "limit": velocity_limit,
+                            "sample_interval_seconds": sample_interval,
+                        }
+                    )
     flattened = tuple(value for target in trajectory for value in target)
     max_live_delta = max(
         abs(value - current)
@@ -207,11 +290,29 @@ def validate(
             "maximum_target_delta_from_live": max_live_delta,
             "maximum_arm_target_delta_from_standard_start": max_standard_arm_delta,
             "maximum_per_target_delta": max_step_delta,
+            "training_sample_interval_seconds": sample_interval,
+            "maximum_adjacent_arm_target_velocity": (
+                max(
+                    abs(current - previous) / sample_interval
+                    for previous_target, current_target in zip(trajectory, trajectory[1:])
+                    for previous, current in zip(
+                        previous_target[:ARM_DIMENSION],
+                        current_target[:ARM_DIMENSION],
+                        strict=True,
+                    )
+                )
+                if sample_interval is not None
+                else None
+            ),
             "urdf": str(urdf),
             "urdf_sha256": _sha256(urdf),
         },
         "unassessed_requirements": [
-            "trajectory timestep and velocity limit",
+            *(
+                ["trajectory timestep and velocity limit"]
+                if sample_interval is None
+                else ["controller command-rate, acceleration, and trajectory-tracking limits"]
+            ),
             "workspace and collision clearance",
             "torque/contact feedback abort",
             "rt/arm_sdk controller watchdog and authority release",
@@ -230,6 +331,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--standard-start", type=Path, required=True)
     parser.add_argument("--urdf", type=Path, required=True)
     parser.add_argument("--expected-action-plan-sha256", required=True)
+    parser.add_argument("--training-time-audit", type=Path, required=True)
+    parser.add_argument("--expected-training-time-audit-sha256", required=True)
     return parser.parse_args()
 
 
@@ -243,6 +346,12 @@ def main() -> int:
         actual = _sha256(plan_path)
         if actual != expected:
             raise ValueError("action-plan SHA-256 does not match its frozen value")
+        audit_path = args.training_time_audit.resolve()
+        expected_audit = args.expected_training_time_audit_sha256.lower()
+        if len(expected_audit) != 64 or any(char not in "0123456789abcdef" for char in expected_audit):
+            raise ValueError("expected training-time audit SHA-256 must be 64 lowercase hexadecimal characters")
+        if _sha256(audit_path) != expected_audit:
+            raise ValueError("training-time audit SHA-256 does not match its frozen value")
         plan = _read_object(plan_path, "action plan")
         observation_path = args.observation.resolve()
         observation = _read_object(observation_path, "observation")
@@ -257,6 +366,7 @@ def main() -> int:
             observation,
             _read_object(args.standard_start.resolve(), "standard-start configuration"),
             args.urdf.resolve(),
+            _read_object(audit_path, "training-time audit"),
         )
     except Exception as error:  # noqa: BLE001 - preserve a machine-readable rejection
         result = {
