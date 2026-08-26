@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -129,3 +130,28 @@ class UniFoLMZeroWritePreflightTest(unittest.TestCase):
         self.assertIs(RUNNER._build_brainco26_policy(build_framework, config), model)
         self.assertIn(RUNNER.UNIFOLM_BRAINCO26_ARG, observed_argv)
         self.assertEqual(sys.argv, original_argv)
+
+    def test_action_plan_is_bound_to_one_observation_and_has_no_execution_capability(
+        self,
+    ) -> None:
+        actions = tuple(tuple(float(step) for _ in range(26)) for step in range(25))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "action-plan.json"
+            digest = RUNNER.write_action_plan(
+                output,
+                checkpoint=Path("/models/final.pt"),
+                checkpoint_sha256="a" * 64,
+                observation=Path("/observations/live.json"),
+                observation_sha256="b" * 64,
+                captured_at_ns=123,
+                actions=actions,
+            )
+            value = RUNNER._read_json(output, "action plan")
+            self.assertEqual(digest, hashlib.sha256(output.read_bytes()).hexdigest())
+
+        self.assertEqual(value["execution_mode"], "zero-write")
+        self.assertEqual(value["trajectory"], [list(action) for action in actions])
+        self.assertEqual(value["checkpoint"]["sha256"], "a" * 64)
+        self.assertEqual(value["observation"]["sha256"], "b" * 64)
+        self.assertEqual(value["command_publishers_created"], 0)
+        self.assertEqual(value["writes"], 0)

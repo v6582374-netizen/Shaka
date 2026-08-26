@@ -30,6 +30,7 @@ from typing import Any
 
 
 PROTOCOL = "shaka.unifolm-vla-brainco26-zero-write-preflight.v1"
+ACTION_PLAN_SCHEMA_VERSION = 1
 OBSERVATION_SCHEMA_VERSION = 1
 ACTION_DIMENSION = 26
 ACTION_HORIZON = 25
@@ -71,6 +72,64 @@ def _read_json(path: Path, description: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{description} must be a JSON object")
     return value
+
+
+def write_action_plan(
+    path: Path,
+    *,
+    checkpoint: Path,
+    checkpoint_sha256: str,
+    observation: Path,
+    observation_sha256: str,
+    captured_at_ns: Any,
+    actions: tuple[tuple[float, ...], ...],
+) -> str:
+    """Persist the full inferred trajectory as evidence, never as a command.
+
+    A future safety validator consumes this immutable action-plan artifact; it
+    must not infer a trajectory from a terminal summary or rerun a model under
+    a different observation.  The caller deliberately supplies an existing
+    parent directory so an accidental path typo cannot create an unreviewed
+    output tree.
+    """
+    if not path.parent.is_dir():
+        raise ValueError(f"action-plan output directory is absent: {path.parent}")
+    if not isinstance(captured_at_ns, int) or captured_at_ns < 0:
+        raise ValueError("action-plan observation timestamp is invalid")
+    if len(actions) != ACTION_HORIZON or any(
+        len(action) != ACTION_DIMENSION for action in actions
+    ):
+        raise ValueError("action-plan trajectory does not match the BrainCo26 contract")
+    value = {
+        "schema_version": ACTION_PLAN_SCHEMA_VERSION,
+        "kind": "unifolm_vla_action_plan_evidence",
+        "execution_mode": "zero-write",
+        "checkpoint": {"path": str(checkpoint), "sha256": checkpoint_sha256},
+        "observation": {
+            "path": str(observation),
+            "sha256": observation_sha256,
+            "captured_at_ns": captured_at_ns,
+        },
+        "contract": {
+            "state_layout": "g1_motor_15_to_28,left_brainco_6,right_brainco_6",
+            "action_dimension": ACTION_DIMENSION,
+            "action_horizon": ACTION_HORIZON,
+        },
+        "trajectory": [list(action) for action in actions],
+        "command_publishers_created": 0,
+        "writes": 0,
+        "physical_rollout_attempts_consumed": 0,
+    }
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return _sha256_file(path)
 
 
 def _finite_vector(value: Any, dimension: int, description: str) -> tuple[float, ...]:
@@ -399,7 +458,7 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
     )
     completed_ns = time.time_ns()
     flattened = tuple(value for action in actions for value in action)
-    return {
+    result = {
         "result": "unifolm_vla_zero_write_preflight_ok",
         "protocol": PROTOCOL,
         "execution_mode": "zero-write",
@@ -435,6 +494,22 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
         "physical_rollout_attempts_consumed": 0,
         "robot_runtime_consumed_s": 0,
     }
+    action_plan_output = args.action_plan_output
+    if action_plan_output is not None:
+        action_plan_path = action_plan_output.resolve()
+        result["action_plan"] = {
+            "path": str(action_plan_path),
+            "sha256": write_action_plan(
+                action_plan_path,
+                checkpoint=checkpoint,
+                checkpoint_sha256=checkpoint_digest,
+                observation=observation_path,
+                observation_sha256=observation_digest,
+                captured_at_ns=observation.get("captured_at_ns"),
+                actions=actions,
+            ),
+        }
+    return result
 
 
 def parse_args() -> argparse.Namespace:
@@ -449,6 +524,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instruction", default=DEFAULT_INSTRUCTION)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--action-plan-output",
+        type=Path,
+        help="write the full predicted trajectory as a zero-write evidence JSON",
+    )
     return parser.parse_args()
 
 
