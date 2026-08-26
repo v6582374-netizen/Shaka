@@ -32,6 +32,9 @@ CONTRACT_KIND = "g1_vla_robot_side_protection_contract"
 ARM_DIMENSION = 14
 HAND_DIMENSION = 12
 ACTION_DIMENSION = ARM_DIMENSION + HAND_DIMENSION
+BODY_DIMENSION = 34
+MOTOR_DIMENSION = 29
+ARM_MOTOR_OFFSET = 15
 HUMANOID_PROCESS = "humanoid"
 ARM_SDK_TOPIC = "rt/arm_sdk"
 
@@ -252,6 +255,63 @@ class LiveState:
             control_entry_process=str(safety.get("control_entry_process", "")),
             control_entry_topic=str(safety.get("control_entry_topic", "")),
         )
+
+
+def live_state_from_connected_observation(
+    observation: dict[str, Any], safety: dict[str, Any]
+) -> LiveState:
+    """Map the additive G1 telemetry envelope into one guardian feedback tick.
+
+    The state envelope's first five ``body`` slots are IMU values.  Its arm
+    pose used by the VLA starts at ``body[20]``, which corresponds to motor
+    slots ``15..28`` in the native LowState arrays.  Workspace and contact
+    safety are intentionally supplied separately: neither can be inferred
+    from a raw joint-state packet.
+    """
+    robot_state = _required_object(observation.get("robot_state"), "observation.robot_state")
+    brainco = _required_object(observation.get("brainco"), "observation.brainco")
+    left = _required_object(brainco.get("left"), "observation.brainco.left")
+    right = _required_object(brainco.get("right"), "observation.brainco.right")
+    body = _vector(robot_state.get("body"), BODY_DIMENSION, "observation.robot_state.body")
+    motor_velocities = _vector(
+        robot_state.get("motor_velocities_rad_s"),
+        MOTOR_DIMENSION,
+        "observation.robot_state.motor_velocities_rad_s",
+    )
+    motor_torques = _vector(
+        robot_state.get("motor_torques_nm"),
+        MOTOR_DIMENSION,
+        "observation.robot_state.motor_torques_nm",
+    )
+    return LiveState.from_object(
+        {
+            "timestamp_ns": robot_state.get("assembled_time_ns"),
+            "arm": {
+                "positions_rad": list(body[20 : 20 + ARM_DIMENSION]),
+                "velocities_rad_s": list(
+                    motor_velocities[ARM_MOTOR_OFFSET : ARM_MOTOR_OFFSET + ARM_DIMENSION]
+                ),
+                "torques_nm": list(
+                    motor_torques[ARM_MOTOR_OFFSET : ARM_MOTOR_OFFSET + ARM_DIMENSION]
+                ),
+            },
+            "hands": {
+                "positions": list(
+                    _vector(left.get("positions"), 6, "observation.brainco.left.positions")
+                    + _vector(right.get("positions"), 6, "observation.brainco.right.positions")
+                ),
+                "velocities_s": list(
+                    _vector(left.get("velocities"), 6, "observation.brainco.left.velocities")
+                    + _vector(right.get("velocities"), 6, "observation.brainco.right.velocities")
+                ),
+                "currents": list(
+                    _vector(left.get("currents"), 6, "observation.brainco.left.currents")
+                    + _vector(right.get("currents"), 6, "observation.brainco.right.currents")
+                ),
+            },
+            "safety": safety,
+        }
+    )
 
 
 @dataclass(frozen=True)

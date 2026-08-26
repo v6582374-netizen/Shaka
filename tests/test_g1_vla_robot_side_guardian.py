@@ -86,6 +86,29 @@ def candidate(*, issued_at_ns: int = 1_000_000_000) -> dict[str, object]:
     }
 
 
+def connected_observation() -> dict[str, object]:
+    return {
+        "robot_state": {
+            "assembled_time_ns": 1_000_000_000,
+            "body": [float(index) for index in range(34)],
+            "motor_velocities_rad_s": [float(index) / 10.0 for index in range(29)],
+            "motor_torques_nm": [float(index) / 100.0 for index in range(29)],
+        },
+        "brainco": {
+            "left": {
+                "positions": [0.1] * 6,
+                "velocities": [0.2] * 6,
+                "currents": [0.3] * 6,
+            },
+            "right": {
+                "positions": [0.4] * 6,
+                "velocities": [0.5] * 6,
+                "currents": [0.6] * 6,
+            },
+        },
+    }
+
+
 def guardian() -> object:
     return GUARDIAN.RobotSideGuardian(GUARDIAN.ProtectionContract.from_object(contract()))
 
@@ -149,6 +172,25 @@ class RobotSideGuardianTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "state.arm.torques_nm"):
             GUARDIAN.LiveState.from_object(incomplete)
+
+    def test_maps_live_g1_feedback_without_guessing_workspace_or_contact(self) -> None:
+        safety = state()["safety"]  # type: ignore[index]
+        mapped = GUARDIAN.live_state_from_connected_observation(
+            connected_observation(), safety
+        )
+
+        self.assertEqual(mapped.arm_positions_rad, tuple(float(index) for index in range(20, 34)))
+        self.assertEqual(mapped.arm_velocities_rad_s[0], 1.5)
+        self.assertEqual(mapped.arm_torques_nm[-1], 0.28)
+        self.assertEqual(mapped.hand_positions, (0.1,) * 6 + (0.4,) * 6)
+        self.assertEqual(mapped.hand_currents, (0.3,) * 6 + (0.6,) * 6)
+
+    def test_connected_observation_requires_added_velocity_and_torque_fields(self) -> None:
+        incomplete = connected_observation()
+        del incomplete["robot_state"]["motor_torques_nm"]  # type: ignore[index]
+
+        with self.assertRaisesRegex(ValueError, "motor_torques_nm"):
+            GUARDIAN.live_state_from_connected_observation(incomplete, state()["safety"])  # type: ignore[index]
 
     def test_relative_target_and_velocity_limits_release_authority(self) -> None:
         unsafe = candidate()

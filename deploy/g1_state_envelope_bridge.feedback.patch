@@ -1,0 +1,48 @@
+# Applies only to SHA-256 1d48d05cd0ec8d847a784a487499bb095244bfb75e0b4552b082f17284944a9f
+# of g1_state_envelope_bridge.cpp.  It adds telemetry from already-subscribed
+# rt/lowstate samples; it contains no command topic, publisher, or device path.
+--- g1_state_envelope_bridge.cpp
++++ g1_state_envelope_bridge.cpp
+@@ -201,6 +201,22 @@
+     return values;
+ }
+ 
++std::array<double, kBodyJointCount> motor_velocities(const LowState& message) {
++    std::array<double, kBodyJointCount> values{};
++    for (std::size_t index = 0; index < kBodyJointCount; ++index) {
++        values[index] = message.motor_state()[index].dq();
++    }
++    return values;
++}
++
++std::array<double, kBodyJointCount> motor_torques(const LowState& message) {
++    std::array<double, kBodyJointCount> values{};
++    for (std::size_t index = 0; index < kBodyJointCount; ++index) {
++        values[index] = message.motor_state()[index].tau_est();
++    }
++    return values;
++}
++
+ std::array<double, kHandJointCount> hand_values(const MotorStates& message) {
+     if (message.states().size() < kHandJointCount) {
+         throw std::runtime_error("BrainCo state contains fewer than six joints");
+@@ -217,6 +233,8 @@
+         uint64_t sequence,
+         uint64_t assembled_time_ns) {
+     const auto body = body_values(snapshot.body);
++    const auto motor_velocity = motor_velocities(snapshot.body);
++    const auto motor_torque = motor_torques(snapshot.body);
+     const auto left_hand = hand_values(snapshot.left_hand);
+     const auto right_hand = hand_values(snapshot.right_hand);
+     const std::array<uint64_t, 3> source_times = {
+@@ -249,6 +267,10 @@
+            << "\"body\":";
+     append_array(output, body);
++    output << ",\"motor_velocities_rad_s\":";
++    append_array(output, motor_velocity);
++    output << ",\"motor_torques_nm\":";
++    append_array(output, motor_torque);
+     output << ",\"left_hand\":";
+     append_array(output, left_hand);
+     output << ",\"right_hand\":";
+     append_array(output, right_hand);
