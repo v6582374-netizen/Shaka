@@ -433,10 +433,9 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             root = Path(temporary)
             manifest = self.write_fixture(root)
             process = self.start_cli(root, manifest)
-            audit_path = root / "runs" / ".RUN-001.partial" / "artifacts"
-            audit_path /= "adapter-audit.jsonl"
+            partial_directory = root / "runs" / ".RUN-001.partial"
             deadline = time.monotonic() + 2
-            while not audit_path.is_file():
+            while not partial_directory.is_dir():
                 self.assertIsNone(process.poll(), "runner exited before acceptance")
                 self.assertLess(time.monotonic(), deadline, "runner was not accepted")
                 time.sleep(0.01)

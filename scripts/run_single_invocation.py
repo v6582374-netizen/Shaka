@@ -565,9 +565,14 @@ def run(manifest_path: Path) -> dict[str, Any]:
     }
     for signum in previous_signal_handlers:
         signal.signal(signum, _interrupt_invocation)
+    blocked_signals = set(previous_signal_handlers)
+    previous_signal_mask = signal.pthread_sigmask(signal.SIG_BLOCK, blocked_signals)
     try:
-        paths = _accept_run(manifest)
-        progress = RunProgress()
+        try:
+            paths = _accept_run(manifest)
+            progress = RunProgress()
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_signal_mask)
         deadline = time.monotonic() + manifest.maximum_duration_s
         readiness = _run_adapter(
             "readiness",
