@@ -16,6 +16,7 @@ import json
 import os
 import queue
 import re
+import signal
 import statistics
 import struct
 import threading
@@ -73,6 +74,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-host", default="192.168.123.164")
     parser.add_argument("--network-interface", default="enp0s31f6")
     parser.add_argument("--duration-s", type=float, default=5.0)
+    parser.add_argument("--post-roll-s", type=float, default=1.0)
+    parser.add_argument(
+        "--lifecycle-handshake",
+        action="store_true",
+        help="publish ready/stop lifecycle events and treat SIGTERM as a graceful stop",
+    )
     parser.add_argument("--discovery-timeout-s", type=float, default=8.0)
     parser.add_argument("--minimum-camera-frames", type=int, default=30)
     parser.add_argument("--minimum-state-samples", type=int, default=30)
@@ -234,10 +241,55 @@ def _json_line(stream: Any, value: dict[str, Any]) -> None:
     stream.flush()
 
 
-def record(args: argparse.Namespace) -> dict[str, Any]:
+class RecorderLifecycle:
+    def __init__(
+        self, episode_id: str, partial_directory: Path, publish_events: bool
+    ) -> None:
+        self.episode_id = episode_id
+        self.partial_directory = partial_directory
+        self.publish_events = publish_events
+        self.phase = "initializing_output"
+        self.ready = False
+
+    def event(
+        self,
+        event: str,
+        *,
+        persist: bool = True,
+        publish: bool = True,
+        **values: Any,
+    ) -> dict[str, Any]:
+        payload = {
+            "event": event,
+            "episode_id": self.episode_id,
+            "time_ns": time.time_ns(),
+            "execution_authority": "none",
+            "command_publishers_created": 0,
+            "writes": 0,
+            **values,
+        }
+        if persist and self.partial_directory.is_dir():
+            with (self.partial_directory / "recorder_lifecycle.jsonl").open(
+                "a", encoding="utf-8"
+            ) as stream:
+                _json_line(stream, payload)
+        if publish and self.publish_events:
+            print(json.dumps(payload, sort_keys=True), flush=True)
+        return payload
+
+
+def _sources_available(counts: dict[str, int]) -> bool:
+    return all(count > 0 for count in counts.values())
+
+
+def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str, Any]:
     episode_id = _validate_episode_id(args.episode_id)
+    post_roll_s = float(getattr(args, "post_roll_s", 1.0))
+    lifecycle_handshake = bool(getattr(args, "lifecycle_handshake", False))
     if args.duration_s <= 0 or args.discovery_timeout_s <= 0:
         raise ValueError("recording duration and discovery timeout must be positive")
+    if post_roll_s < 0:
+        raise ValueError("post-roll duration must not be negative")
     if args.minimum_camera_frames < 1 or args.minimum_state_samples < 1:
         raise ValueError("minimum sample counts must be positive")
 
@@ -248,6 +300,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         raise FileExistsError(f"episode output already exists: {episode_id}")
     output_root.mkdir(parents=True, exist_ok=True)
     partial_directory.mkdir()
+    lifecycle.event("read_only_recorder_initializing", publish=False)
 
     camera_directories = {
         spec.camera_id: partial_directory / "cameras" / spec.camera_id
@@ -278,46 +331,73 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         ]
     ] = []
     stop = threading.Event()
+    external_stop_requested = threading.Event()
     sample_queue: queue.SimpleQueue[tuple[str, int, Any]] = queue.SimpleQueue()
     reader_errors: queue.SimpleQueue[str] = queue.SimpleQueue()
     threads: list[threading.Thread] = []
     context: Any | None = None
     sockets: dict[Any, CameraSpec] = {}
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
-    with (
-        controller_path.open("w", encoding="utf-8") as controller_stream,
-        state_path.open("w", encoding="utf-8") as state_stream,
-        camera_timestamp_path.open("w", encoding="utf-8", newline="") as camera_stream,
-    ):
-        camera_writer = csv.writer(camera_stream)
-        camera_writer.writerow(
-            [
-                "camera_id",
-                "file_name",
-                "sequence",
-                "frame_time_ns",
-                "time_origin",
-                "clock_id",
-                "source_capture_time_ns",
-                "source_clock_id",
-                "read_started_time_ns",
-                "read_completed_time_ns",
-                "payload_sha256",
-            ]
-        )
-        _json_line(
-            controller_stream,
-            {
-                "event": "read_only_recorder_started",
-                "episode_id": episode_id,
-                "time_ns": start_utc_ns,
-                "execution_authority": "none",
-                "command_publishers_created": 0,
-                "writes": 0,
-            },
-        )
+    def request_stop(signum: int, frame: Any) -> None:
+        del signum, frame
+        external_stop_requested.set()
 
-        try:
+    if lifecycle_handshake:
+        signal.signal(signal.SIGTERM, request_stop)
+
+    termination_reason = "fixed_duration_elapsed"
+    try:
+        with (
+            controller_path.open("w", encoding="utf-8") as controller_stream,
+            state_path.open("w", encoding="utf-8") as state_stream,
+            hand_path.open("w", encoding="utf-8", newline="") as hand_stream,
+            camera_timestamp_path.open(
+                "w", encoding="utf-8", newline=""
+            ) as camera_stream,
+        ):
+            hand_writer = csv.writer(hand_stream)
+            hand_writer.writerow(
+                [
+                    "local_received_time_ns",
+                    "g1_estimated_time_ns",
+                    "local_minus_g1_offset_ns",
+                    "side",
+                ]
+                + [f"q_{index}" for index in range(6)]
+                + [f"dq_{index}" for index in range(6)]
+                + [f"current_a_{index}" for index in range(6)]
+            )
+            hand_stream.flush()
+            camera_writer = csv.writer(camera_stream)
+            camera_writer.writerow(
+                [
+                    "camera_id",
+                    "file_name",
+                    "sequence",
+                    "frame_time_ns",
+                    "time_origin",
+                    "clock_id",
+                    "source_capture_time_ns",
+                    "source_clock_id",
+                    "read_started_time_ns",
+                    "read_completed_time_ns",
+                    "payload_sha256",
+                ]
+            )
+            _json_line(
+                controller_stream,
+                {
+                    "event": "read_only_recorder_started",
+                    "episode_id": episode_id,
+                    "time_ns": start_utc_ns,
+                    "execution_authority": "none",
+                    "command_publishers_created": 0,
+                    "writes": 0,
+                },
+            )
+
+            lifecycle.phase = "initializing_sources"
             import zmq
             from cyclonedds.domain import DomainParticipant
             from cyclonedds.sub import DataReader, Subscriber
@@ -359,8 +439,16 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                 poller.register(socket, zmq.POLLIN)
                 sockets[socket] = spec
 
+            lifecycle.phase = "waiting_for_observations"
             deadline = time.monotonic() + args.duration_s
-            while time.monotonic() < deadline:
+            stop_deadline: float | None = None
+            while True:
+                now = time.monotonic()
+                if stop_deadline is not None and now >= stop_deadline:
+                    termination_reason = "external_stop_request"
+                    break
+                if now >= deadline:
+                    break
                 for socket, _ in poller.poll(20):
                     spec = sockets[socket]
                     frame = _decode_camera_message(socket.recv())
@@ -428,7 +516,9 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                         counts["state_envelope"] += 1
                     else:
                         positions, velocities, currents = _extract_hand_values(sample)
-                        side = "left" if topic_name == LEFT_HAND_STATE_TOPIC else "right"
+                        side = (
+                            "left" if topic_name == LEFT_HAND_STATE_TOPIC else "right"
+                        )
                         hand_samples.append(
                             (
                                 received_time_ns,
@@ -443,9 +533,28 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                 if not reader_errors.empty():
                     raise RuntimeError(reader_errors.get())
 
+                if not lifecycle.ready and _sources_available(counts):
+                    lifecycle.ready = True
+                    lifecycle.phase = "recording"
+                    lifecycle.event("read_only_recorder_ready")
+
+                if external_stop_requested.is_set() and stop_deadline is None:
+                    if not lifecycle.ready:
+                        raise RuntimeError(
+                            "stop requested before recorder became ready"
+                        )
+                    lifecycle.phase = "post_roll"
+                    stop_deadline = time.monotonic() + post_roll_s
+                    lifecycle.event(
+                        "read_only_recorder_stop_requested",
+                        post_roll_s=post_roll_s,
+                    )
+
             stop.set()
             for thread in threads:
                 thread.join(timeout=1.0)
+            if not reader_errors.empty():
+                raise RuntimeError(reader_errors.get())
 
             if any(
                 counts[spec.camera_id] < args.minimum_camera_frames for spec in CAMERAS
@@ -453,13 +562,28 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                 raise RuntimeError(f"camera sample minimum not met: {counts}")
             if counts["state_envelope"] < args.minimum_state_samples:
                 raise RuntimeError(f"state sample minimum not met: {counts}")
-            if counts["left_hand"] < args.minimum_state_samples or counts[
-                "right_hand"
-            ] < args.minimum_state_samples:
+            if (
+                counts["left_hand"] < args.minimum_state_samples
+                or counts["right_hand"] < args.minimum_state_samples
+            ):
                 raise RuntimeError(f"BrainCo sample minimum not met: {counts}")
             if not clock_offset_samples_ns:
                 raise RuntimeError("no local-to-G1 clock offset samples are available")
 
+            median_clock_offset_ns = _median_clock_offset_ns(clock_offset_samples_ns)
+            for received_time_ns, side, positions, velocities, currents in hand_samples:
+                hand_writer.writerow(
+                    [
+                        received_time_ns,
+                        received_time_ns - median_clock_offset_ns,
+                        median_clock_offset_ns,
+                        side,
+                    ]
+                    + list(positions)
+                    + list(velocities)
+                    + list(currents)
+                )
+            hand_stream.flush()
             end_utc_ns = time.time_ns()
             _json_line(
                 controller_stream,
@@ -472,42 +596,19 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                     "writes": 0,
                 },
             )
-        finally:
+    finally:
+        if lifecycle_handshake:
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
+        if not stop.is_set():
             stop.set()
-            for thread in threads:
-                thread.join(timeout=1.0)
-            for socket in sockets:
-                socket.close(linger=0)
-            if context is not None:
-                context.term()
+        for thread in threads:
+            thread.join(timeout=1.0)
+        for socket in sockets:
+            socket.close(linger=0)
+        if context is not None:
+            context.term()
 
-    median_clock_offset_ns = _median_clock_offset_ns(clock_offset_samples_ns)
-    with hand_path.open("w", encoding="utf-8", newline="") as hand_stream:
-        hand_writer = csv.writer(hand_stream)
-        hand_writer.writerow(
-            [
-                "local_received_time_ns",
-                "g1_estimated_time_ns",
-                "local_minus_g1_offset_ns",
-                "side",
-            ]
-            + [f"q_{index}" for index in range(6)]
-            + [f"dq_{index}" for index in range(6)]
-            + [f"current_a_{index}" for index in range(6)]
-        )
-        for received_time_ns, side, positions, velocities, currents in hand_samples:
-            hand_writer.writerow(
-                [
-                    received_time_ns,
-                    received_time_ns - median_clock_offset_ns,
-                    median_clock_offset_ns,
-                    side,
-                ]
-                + list(positions)
-                + list(velocities)
-                + list(currents)
-            )
-
+    lifecycle.phase = "finalizing"
     metadata = {
         "schema_version": 1,
         "episode_id": episode_id,
@@ -515,6 +616,8 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         "started_at_utc_ns": start_utc_ns,
         "ended_at_utc_ns": end_utc_ns,
         "duration_s": (end_utc_ns - start_utc_ns) / 1e9,
+        "termination_reason": termination_reason,
+        "post_roll_s": post_roll_s,
         "network_interface": args.network_interface,
         "camera_host": args.camera_host,
         "camera_protocol": "vegapunk.act.camera_frame.v3",
@@ -538,17 +641,48 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     (partial_directory / "capture_metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    lifecycle.event(
+        "read_only_recorder_finalizing",
+        publish=False,
+        termination_reason=termination_reason,
+    )
     _write_sha256_manifest(partial_directory)
     os.replace(partial_directory, final_directory)
     return {
+        "event": "read_only_recorder_completed",
         "result": "read_only_evaluator_episode_recorded",
         "episode_id": episode_id,
         "output_directory": str(final_directory),
         "counts": counts,
+        "termination_reason": termination_reason,
         "execution_authority": "none",
         "command_publishers_created": 0,
         "writes": 0,
     }
+
+
+def record(args: argparse.Namespace) -> dict[str, Any]:
+    episode_id = str(args.episode_id)
+    partial_directory = args.output_root.resolve() / f".{episode_id}.partial"
+    lifecycle = RecorderLifecycle(
+        episode_id,
+        partial_directory,
+        bool(getattr(args, "lifecycle_handshake", False)),
+    )
+    try:
+        return _record(args, lifecycle)
+    except BaseException as error:
+        reason = (
+            "operator interrupt" if isinstance(error, KeyboardInterrupt) else str(error)
+        )
+        lifecycle.event(
+            "read_only_recorder_failed",
+            result="read_only_evaluator_episode_rejected",
+            phase=lifecycle.phase,
+            ready=lifecycle.ready,
+            reason=reason,
+        )
+        raise
 
 
 def main() -> int:
@@ -556,12 +690,19 @@ def main() -> int:
     try:
         result = record(args)
     except (KeyboardInterrupt, Exception) as error:  # noqa: BLE001
-        reason = "operator interrupt" if isinstance(error, KeyboardInterrupt) else str(error)
+        if args.lifecycle_handshake:
+            return 130 if isinstance(error, KeyboardInterrupt) else 2
+        reason = (
+            "operator interrupt" if isinstance(error, KeyboardInterrupt) else str(error)
+        )
         print(
             json.dumps(
                 {
+                    "event": "read_only_recorder_failed",
                     "result": "read_only_evaluator_episode_rejected",
                     "reason": reason,
+                    "phase": "validating_arguments",
+                    "ready": False,
                     "command_publishers_created": 0,
                     "writes": 0,
                 },
