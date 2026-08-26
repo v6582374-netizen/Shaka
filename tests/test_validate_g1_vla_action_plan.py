@@ -40,7 +40,7 @@ def plan() -> dict[str, object]:
         "schema_version": 1,
         "kind": "unifolm_vla_action_plan_evidence",
         "execution_mode": "zero-write",
-        "contract": {"action_dimension": 26, "action_horizon": 25},
+        "contract": {"action_dimension": 26, "action_horizon": 25, "live_brainco_action_units": "normalized_0_to_1"},
         "trajectory": [[0.1] * 14 + [0.5] * 12 for _ in range(25)],
         "command_publishers_created": 0,
         "writes": 0,

@@ -9,7 +9,7 @@ publisher.
 
 The training contract is fixed here rather than inferred from a model output:
 the first half of the stereo head frame is ``cam_left_high``; state is G1 motor
-slots 15..28 followed by the two six-channel BrainCo positions.  The current
+slots 15..28 followed by the two six-channel BrainCo *radian* positions.  The current
 state-envelope bridge prefixes its 29 motor positions with five IMU values,
 which makes the arm slice ``body[20:34]``.
 """
@@ -34,11 +34,20 @@ ACTION_PLAN_SCHEMA_VERSION = 1
 OBSERVATION_SCHEMA_VERSION = 1
 ACTION_DIMENSION = 26
 ACTION_HORIZON = 25
+ARM_DIMENSION = 14
 BODY_DIMENSION = 34
 BODY_MOTOR_OFFSET = 5
 ARM_MOTOR_INDICES = tuple(range(15, 29))
 ARM_BODY_INDICES = tuple(BODY_MOTOR_OFFSET + index for index in ARM_MOTOR_INDICES)
 HAND_DIMENSION = 6
+HAND_LIMITS_RAD = (
+    (0.0, 1.52),
+    (0.0, 1.05),
+    (0.0, 1.47),
+    (0.0, 1.47),
+    (0.0, 1.47),
+    (0.0, 1.47),
+)
 PRIMARY_CAMERA_ID = "head_camera"
 PRIMARY_CAMERA_SIZE = (1280, 480)
 PRIMARY_VIEW_SIZE = (640, 480)
@@ -83,6 +92,7 @@ def write_action_plan(
     observation_sha256: str,
     captured_at_ns: Any,
     actions: tuple[tuple[float, ...], ...],
+    model_actions: tuple[tuple[float, ...], ...],
 ) -> str:
     """Persist the full inferred trajectory as evidence, never as a command.
 
@@ -96,8 +106,11 @@ def write_action_plan(
         raise ValueError(f"action-plan output directory is absent: {path.parent}")
     if not isinstance(captured_at_ns, int) or captured_at_ns < 0:
         raise ValueError("action-plan observation timestamp is invalid")
-    if len(actions) != ACTION_HORIZON or any(
-        len(action) != ACTION_DIMENSION for action in actions
+    if (
+        len(actions) != ACTION_HORIZON
+        or len(model_actions) != ACTION_HORIZON
+        or any(len(action) != ACTION_DIMENSION for action in actions)
+        or any(len(action) != ACTION_DIMENSION for action in model_actions)
     ):
         raise ValueError("action-plan trajectory does not match the BrainCo26 contract")
     value = {
@@ -112,10 +125,14 @@ def write_action_plan(
         },
         "contract": {
             "state_layout": "g1_motor_15_to_28,left_brainco_6,right_brainco_6",
+            "model_hand_state_units": "radians",
             "action_dimension": ACTION_DIMENSION,
             "action_horizon": ACTION_HORIZON,
+            "model_hand_action_units": "radians",
+            "live_brainco_action_units": "normalized_0_to_1",
         },
         "trajectory": [list(action) for action in actions],
+        "model_trajectory": [list(action) for action in model_actions],
         "command_publishers_created": 0,
         "writes": 0,
         "physical_rollout_attempts_consumed": 0,
@@ -144,8 +161,47 @@ def _finite_vector(value: Any, dimension: int, description: str) -> tuple[float,
     return result
 
 
+def brainco_normalized_to_radians(
+    values: tuple[float, ...], description: str
+) -> tuple[float, ...]:
+    if len(values) != HAND_DIMENSION:
+        raise ValueError(f"{description} must contain six values")
+    if any(value < 0.0 or value > 1.0 for value in values):
+        raise ValueError(f"{description} must be normalized to [0, 1]")
+    return tuple(
+        low + value * (high - low)
+        for value, (low, high) in zip(values, HAND_LIMITS_RAD, strict=True)
+    )
+
+
+def brainco_radians_to_normalized(values: tuple[float, ...]) -> tuple[float, ...]:
+    """Convert model-space radians without clamping so admission can reject overflow."""
+    if len(values) != HAND_DIMENSION:
+        raise ValueError("BrainCo radians must contain six values")
+    return tuple(
+        (value - low) / (high - low)
+        for value, (low, high) in zip(values, HAND_LIMITS_RAD, strict=True)
+    )
+
+
+def training_actions_to_live_targets(
+    actions: tuple[tuple[float, ...], ...]
+) -> tuple[tuple[float, ...], ...]:
+    """Preserve arm radians; translate only model-space hand radians to live units."""
+    if len(actions) != ACTION_HORIZON:
+        raise ValueError("model action horizon is invalid")
+    targets: list[tuple[float, ...]] = []
+    for index, action in enumerate(actions):
+        if len(action) != ACTION_DIMENSION:
+            raise ValueError(f"model action {index} does not contain 26 values")
+        left = brainco_radians_to_normalized(action[ARM_DIMENSION : ARM_DIMENSION + HAND_DIMENSION])
+        right = brainco_radians_to_normalized(action[ARM_DIMENSION + HAND_DIMENSION :])
+        targets.append(action[:ARM_DIMENSION] + left + right)
+    return tuple(targets)
+
+
 def upper_body_state(observation: dict[str, Any]) -> tuple[float, ...]:
-    """Return the 14-arm + 12-hand vector used for VLA training and inference."""
+    """Return 14 arm radians plus 12 model-space BrainCo radians."""
     if observation.get("schema_version") != OBSERVATION_SCHEMA_VERSION:
         raise ValueError("live observation schema version is unsupported")
     robot_state = observation.get("robot_state")
@@ -159,7 +215,11 @@ def upper_body_state(observation: dict[str, Any]) -> tuple[float, ...]:
         raise ValueError("live observation is missing a BrainCo hand")
     left_hand = _finite_vector(left.get("positions"), HAND_DIMENSION, "left BrainCo state")
     right_hand = _finite_vector(right.get("positions"), HAND_DIMENSION, "right BrainCo state")
-    state = tuple(body[index] for index in ARM_BODY_INDICES) + left_hand + right_hand
+    state = (
+        tuple(body[index] for index in ARM_BODY_INDICES)
+        + brainco_normalized_to_radians(left_hand, "left BrainCo state")
+        + brainco_normalized_to_radians(right_hand, "right BrainCo state")
+    )
     if len(state) != ACTION_DIMENSION:
         raise AssertionError("BrainCo26 state layout changed unexpectedly")
     return state
@@ -446,7 +506,7 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
         checkpoint, args.vlm_base.resolve(), args.source_root.resolve(), args.device
     )
     loaded_ns = time.time_ns()
-    actions = _infer(
+    model_actions = _infer(
         model,
         torch_runtime,
         state,
@@ -457,6 +517,7 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
         args.device,
     )
     completed_ns = time.time_ns()
+    actions = training_actions_to_live_targets(model_actions)
     flattened = tuple(value for action in actions for value in action)
     result = {
         "result": "unifolm_vla_zero_write_preflight_ok",
@@ -476,8 +537,11 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
         "input_contract": {
             "state_dimension": len(state),
             "state_layout": "g1_motor_15_to_28,left_brainco_6,right_brainco_6",
+            "model_hand_state_units": "radians",
             "action_dimension": ACTION_DIMENSION,
             "action_horizon": len(actions),
+            "model_hand_action_units": "radians",
+            "live_brainco_action_units": "normalized_0_to_1",
             "instruction": args.instruction,
         },
         "timing": {
@@ -488,6 +552,7 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
             "first_target": list(actions[0]),
             "minimum": min(flattened),
             "maximum": max(flattened),
+            "model_first_target": list(model_actions[0]),
         },
         "command_publishers_created": 0,
         "writes": 0,
@@ -507,6 +572,7 @@ def run_preflight(args: argparse.Namespace) -> dict[str, Any]:
                 observation_sha256=observation_digest,
                 captured_at_ns=observation.get("captured_at_ns"),
                 actions=actions,
+                model_actions=model_actions,
             ),
         }
     return result

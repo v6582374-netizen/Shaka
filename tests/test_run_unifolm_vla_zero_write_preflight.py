@@ -51,8 +51,20 @@ class UniFoLMZeroWritePreflightTest(unittest.TestCase):
         state = RUNNER.upper_body_state(observation())
 
         self.assertEqual(state[:14], tuple(float(index) for index in range(20, 34)))
-        self.assertEqual(state[14:20], (0.1,) * 6)
-        self.assertEqual(state[20:], (0.2,) * 6)
+        self.assertEqual(
+            state[14:20], tuple(high * 0.1 for _, high in RUNNER.HAND_LIMITS_RAD)
+        )
+        self.assertEqual(
+            state[20:], tuple(high * 0.2 for _, high in RUNNER.HAND_LIMITS_RAD)
+        )
+
+    def test_converts_between_live_normalized_hands_and_model_radians(self) -> None:
+        radians = RUNNER.brainco_normalized_to_radians((0.5,) * 6, "test hand")
+
+        self.assertEqual(
+            radians, tuple(high * 0.5 for _, high in RUNNER.HAND_LIMITS_RAD)
+        )
+        self.assertEqual(RUNNER.brainco_radians_to_normalized(radians), (0.5,) * 6)
 
     def test_refuses_a_corrupted_camera_payload(self) -> None:
         value = observation()
@@ -145,12 +157,14 @@ class UniFoLMZeroWritePreflightTest(unittest.TestCase):
                 observation_sha256="b" * 64,
                 captured_at_ns=123,
                 actions=actions,
+                model_actions=actions,
             )
             value = RUNNER._read_json(output, "action plan")
             self.assertEqual(digest, hashlib.sha256(output.read_bytes()).hexdigest())
 
         self.assertEqual(value["execution_mode"], "zero-write")
         self.assertEqual(value["trajectory"], [list(action) for action in actions])
+        self.assertEqual(value["model_trajectory"], [list(action) for action in actions])
         self.assertEqual(value["checkpoint"]["sha256"], "a" * 64)
         self.assertEqual(value["observation"]["sha256"], "b" * 64)
         self.assertEqual(value["command_publishers_created"], 0)

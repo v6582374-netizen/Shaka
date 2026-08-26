@@ -108,14 +108,15 @@ def metrics(prediction: tuple[tuple[float, ...], ...], target: tuple[tuple[float
         for predicted_step, expected_step in zip(prediction, target, strict=True)
         for predicted, expected in zip(predicted_step[ARM_DIMENSION:], expected_step[ARM_DIMENSION:], strict=True)
     ]
-    hand_values = [value for step in prediction for value in step[ARM_DIMENSION:]]
+    live_targets = RUNNER.training_actions_to_live_targets(prediction)
+    hand_values = [value for step in live_targets for value in step[ARM_DIMENSION:]]
     return {
         "mse_26d": sum(error * error for error in errors) / len(errors),
         "mae_26d": sum(abs(error) for error in errors) / len(errors),
         "mse_arm_14d": sum(error * error for error in arm_errors) / len(arm_errors),
         "mse_hand_12d": sum(error * error for error in hand_errors) / len(hand_errors),
         "maximum_absolute_error": max(abs(error) for error in errors),
-        "predicted_brainco_values_outside_0_1": sum(value < 0.0 or value > 1.0 for value in hand_values),
+        "predicted_brainco_values_outside_live_range": sum(value < 0.0 or value > 1.0 for value in hand_values),
     }
 
 
@@ -123,7 +124,7 @@ def aggregate_metrics(cases: list[dict[str, Any]]) -> dict[str, Any]:
     if not cases:
         raise ValueError("cannot aggregate an empty held-out evaluation")
     mean = lambda key: sum(float(case[key]) for case in cases) / len(cases)
-    invalid = sum(int(case["predicted_brainco_values_outside_0_1"]) for case in cases)
+    invalid = sum(int(case["predicted_brainco_values_outside_live_range"]) for case in cases)
     hand_values = len(cases) * ACTION_HORIZON * HAND_DIMENSION
     return {
         "mean_mse_26d": mean("mse_26d"),
@@ -131,8 +132,8 @@ def aggregate_metrics(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_mse_arm_14d": mean("mse_arm_14d"),
         "mean_mse_hand_12d": mean("mse_hand_12d"),
         "maximum_absolute_error": max(float(case["maximum_absolute_error"]) for case in cases),
-        "brainco_values_outside_0_1": invalid,
-        "brainco_values_outside_0_1_rate": invalid / hand_values,
+        "brainco_values_outside_live_range": invalid,
+        "brainco_values_outside_live_range_rate": invalid / hand_values,
     }
 
 

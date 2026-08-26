@@ -21,24 +21,24 @@ class HeldOutEvaluationTest(unittest.TestCase):
         self.assertEqual(chunk[:3], ((1.0,) * 26, (2.0,) * 26, (2.0,) * 26))
         self.assertEqual(len(chunk), 25)
 
-    def test_metrics_counts_unrepresentable_brainco_predictions(self) -> None:
+    def test_metrics_counts_model_radians_outside_the_live_normalized_range(self) -> None:
         prediction = tuple(tuple([0.0] * 14 + [-0.1] * 12) for _ in range(25))
         target = tuple(tuple([0.0] * 26) for _ in range(25))
         result = EVALUATOR.metrics(prediction, target)
 
-        self.assertEqual(result["predicted_brainco_values_outside_0_1"], 300)
+        self.assertEqual(result["predicted_brainco_values_outside_live_range"], 300)
         self.assertAlmostEqual(result["mse_arm_14d"], 0.0)
         self.assertAlmostEqual(result["mse_hand_12d"], 0.01)
 
     def test_aggregate_keeps_global_maximum_and_count_distinct_from_means(self) -> None:
         result = EVALUATOR.aggregate_metrics(
             [
-                {"mse_26d": 1.0, "mae_26d": 2.0, "mse_arm_14d": 3.0, "mse_hand_12d": 4.0, "maximum_absolute_error": 5.0, "predicted_brainco_values_outside_0_1": 1},
-                {"mse_26d": 3.0, "mae_26d": 4.0, "mse_arm_14d": 5.0, "mse_hand_12d": 6.0, "maximum_absolute_error": 8.0, "predicted_brainco_values_outside_0_1": 2},
+                {"mse_26d": 1.0, "mae_26d": 2.0, "mse_arm_14d": 3.0, "mse_hand_12d": 4.0, "maximum_absolute_error": 5.0, "predicted_brainco_values_outside_live_range": 1},
+                {"mse_26d": 3.0, "mae_26d": 4.0, "mse_arm_14d": 5.0, "mse_hand_12d": 6.0, "maximum_absolute_error": 8.0, "predicted_brainco_values_outside_live_range": 2},
             ]
         )
 
         self.assertEqual(result["mean_mse_26d"], 2.0)
         self.assertEqual(result["maximum_absolute_error"], 8.0)
-        self.assertEqual(result["brainco_values_outside_0_1"], 3)
-        self.assertEqual(result["brainco_values_outside_0_1_rate"], 3 / (2 * 25 * 12))
+        self.assertEqual(result["brainco_values_outside_live_range"], 3)
+        self.assertEqual(result["brainco_values_outside_live_range_rate"], 3 / (2 * 25 * 12))

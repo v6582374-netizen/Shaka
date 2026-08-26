@@ -71,8 +71,9 @@ def _trajectory(plan: dict[str, Any]) -> tuple[tuple[float, ...], ...]:
         or not isinstance(contract, dict)
         or contract.get("action_dimension") != ACTION_DIMENSION
         or contract.get("action_horizon") != ACTION_HORIZON
+        or contract.get("live_brainco_action_units") != "normalized_0_to_1"
     ):
-        raise ValueError("action plan does not declare the fixed BrainCo26 contract")
+        raise ValueError("action plan does not declare the fixed live-normalized BrainCo26 contract")
     if any(plan.get(key) != 0 for key in ("command_publishers_created", "writes")):
         raise ValueError("action plan does not preserve its zero-write provenance")
     raw = plan.get("trajectory")

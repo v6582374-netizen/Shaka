@@ -53,10 +53,11 @@ def project(plan: dict[str, Any], source_sha256: str) -> dict[str, Any]:
         or not isinstance(contract, dict)
         or contract.get("action_dimension") != ACTION_DIMENSION
         or contract.get("action_horizon") != ACTION_HORIZON
+        or contract.get("live_brainco_action_units") != "normalized_0_to_1"
         or not isinstance(trajectory, list)
         or len(trajectory) != ACTION_HORIZON
     ):
-        raise ValueError("input does not declare the fixed 25x26 zero-write action-plan contract")
+        raise ValueError("input does not declare the fixed live-normalized 25x26 zero-write action-plan contract")
     if any(plan.get(key) != 0 for key in ("command_publishers_created", "writes")):
         raise ValueError("input plan lacks zero-write provenance")
     projected: list[list[float]] = []
