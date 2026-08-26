@@ -3,11 +3,13 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from PIL import Image
 
@@ -106,7 +108,9 @@ class VLMEpisodeEvaluatorTest(unittest.TestCase):
             json.dumps(
                 {
                     "evaluator_id": "test-evaluator",
+                    "backend": "auto",
                     "model": "test-model",
+                    "codex_model": "test-codex-model",
                     "image_detail": "high",
                     "maximum_panels": 3,
                     "pre_roll_seconds": 0.0,
@@ -172,6 +176,7 @@ class VLMEpisodeEvaluatorTest(unittest.TestCase):
         )
 
         self.assertEqual(result["result"], "succeeded")
+        self.assertEqual(result["backend"], "openai")
         self.assertTrue(result["human_audit_required"])
         arguments = client.responses.arguments
         assert arguments is not None
@@ -206,6 +211,19 @@ class VLMEpisodeEvaluatorTest(unittest.TestCase):
         self.assertEqual(audit["model_result"], "succeeded")
         self.assertEqual(audit["audited_result"], "indeterminate")
         self.assertIn("not live rollout feedback", audit["usage"])
+
+    def test_auto_backend_rejects_without_any_authenticated_provider(self) -> None:
+        evidence = self.root / "evidence"
+        MODULE.prepare_evidence(self.episode, evidence, self.config)
+
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                MODULE, "_codex_cli_authenticated", return_value=False
+            ),
+            self.assertRaisesRegex(RuntimeError, "authenticated Codex CLI"),
+        ):
+            MODULE.evaluate_evidence(evidence, self.config)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,9 @@ import csv
 import hashlib
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -66,7 +69,9 @@ def _load_config(path: Path) -> dict[str, Any]:
     configuration = json.loads(path.read_text(encoding="utf-8"))
     required = {
         "evaluator_id",
+        "backend",
         "model",
+        "codex_model",
         "image_detail",
         "maximum_panels",
         "pre_roll_seconds",
@@ -330,6 +335,98 @@ def _response_input(
     return [{"role": "user", "content": content}]
 
 
+def _codex_prompt(manifest: dict[str, Any], prompt: str) -> str:
+    panel_lines = "\n".join(
+        f"- attached image {index + 1}: panel {panel['panel_index']:02d}, "
+        f"t={panel['relative_time_seconds']:.3f}s"
+        for index, panel in enumerate(manifest["panels"])
+    )
+    return (
+        f"{prompt}\n\n"
+        f"Episode: {manifest['episode_id']}\n"
+        f"Task contract: {manifest['task_contract']}\n"
+        f"Designated fingertip: {manifest['designated_fingertip']}\n"
+        f"Capture complete through controller release: "
+        f"{manifest['capture_complete']}\n"
+        "Attached images are chronological four-view panels:\n"
+        f"{panel_lines}\n"
+    )
+
+
+def _evaluate_with_codex_cli(
+    evidence_directory: Path,
+    manifest: dict[str, Any],
+    prompt: str,
+    model: str,
+) -> VisualAssessment:
+    executable = shutil.which("codex")
+    if executable is None:
+        raise RuntimeError("Codex CLI is unavailable")
+    if not _codex_cli_authenticated(executable):
+        raise RuntimeError("Codex CLI is not logged in")
+    with tempfile.TemporaryDirectory(prefix="shaka-vlm-evaluator-") as temporary:
+        temporary_directory = Path(temporary)
+        schema_path = temporary_directory / "visual-assessment.schema.json"
+        output_path = temporary_directory / "visual-assessment.json"
+        schema_path.write_text(
+            json.dumps(VisualAssessment.model_json_schema(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        command = [
+            executable,
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--model",
+            model,
+            "--output-schema",
+            str(schema_path),
+            "--output-last-message",
+            str(output_path),
+        ]
+        for panel in manifest["panels"]:
+            command.extend(["--image", str(evidence_directory / panel["path"])])
+        command.append("-")
+        completed = subprocess.run(
+            command,
+            input=_codex_prompt(manifest, prompt),
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=evidence_directory,
+            timeout=300,
+        )
+        if completed.returncode != 0:
+            reason = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(f"Codex visual evaluation failed: {reason}")
+        if not output_path.is_file():
+            raise RuntimeError("Codex visual evaluation produced no final response")
+        return VisualAssessment.model_validate_json(
+            output_path.read_text(encoding="utf-8")
+        )
+
+
+def _codex_cli_authenticated(executable: str | None = None) -> bool:
+    executable = executable or shutil.which("codex")
+    if executable is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [executable, "login", "status"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def adjudicate(
     capture_complete: bool,
     controller: dict[str, Any] | None,
@@ -360,6 +457,7 @@ def evaluate_evidence(
     evidence_directory: Path,
     config_path: Path = DEFAULT_CONFIG,
     model: str | None = None,
+    backend: str | None = None,
     client: Any | None = None,
 ) -> dict[str, Any]:
     configuration = _load_config(config_path)
@@ -370,23 +468,48 @@ def evaluate_evidence(
         raise ValueError("evidence was prepared with a different configuration")
     if manifest["prompt_sha256"] != _sha256_file(prompt_path):
         raise ValueError("evidence was prepared with a different prompt")
-    if client is None:
-        if not os.environ.get("OPENAI_API_KEY"):
+    selected_backend = backend or str(configuration["backend"])
+    if client is not None:
+        selected_backend = "openai"
+    if selected_backend == "auto":
+        if os.environ.get("OPENAI_API_KEY"):
+            selected_backend = "openai"
+        elif _codex_cli_authenticated():
+            selected_backend = "codex-cli"
+        else:
+            raise RuntimeError(
+                "neither OPENAI_API_KEY nor an authenticated Codex CLI is available"
+            )
+    if selected_backend == "openai":
+        if client is None and not os.environ.get("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY is not configured")
-        from openai import OpenAI
+        if client is None:
+            from openai import OpenAI
 
-        client = OpenAI()
-    selected_model = model or str(configuration["model"])
-    response = client.responses.parse(
-        model=selected_model,
-        instructions=prompt_path.read_text(encoding="utf-8"),
-        input=_response_input(
-            evidence_directory, manifest, str(configuration["image_detail"])
-        ),
-        text_format=VisualAssessment,
-        store=False,
-    )
-    assessment = response.output_parsed
+            client = OpenAI()
+        selected_model = model or str(configuration["model"])
+        response = client.responses.parse(
+            model=selected_model,
+            instructions=prompt_path.read_text(encoding="utf-8"),
+            input=_response_input(
+                evidence_directory, manifest, str(configuration["image_detail"])
+            ),
+            text_format=VisualAssessment,
+            store=False,
+        )
+        assessment = response.output_parsed
+        response_id = getattr(response, "id", None)
+    elif selected_backend == "codex-cli":
+        selected_model = model or str(configuration["codex_model"])
+        assessment = _evaluate_with_codex_cli(
+            evidence_directory,
+            manifest,
+            prompt_path.read_text(encoding="utf-8"),
+            selected_model,
+        )
+        response_id = None
+    else:
+        raise ValueError(f"unsupported evaluator backend: {selected_backend}")
     if not isinstance(assessment, VisualAssessment):
         raise TypeError("model response did not contain a parsed visual assessment")
     source_metadata = json.loads(
@@ -406,8 +529,9 @@ def evaluate_evidence(
         "evaluator_id": configuration["evaluator_id"],
         "mode": audit_policy["mode"],
         "episode_id": manifest["episode_id"],
+        "backend": selected_backend,
         "model": selected_model,
-        "response_id": getattr(response, "id", None),
+        "response_id": response_id,
         "evidence_manifest_sha256": _sha256_file(manifest_path),
         "configuration_sha256": _sha256_file(config_path),
         "prompt_sha256": _sha256_file(prompt_path),
@@ -465,6 +589,7 @@ def parse_args() -> argparse.Namespace:
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     evaluate.add_argument("--model")
+    evaluate.add_argument("--backend", choices=("auto", "openai", "codex-cli"))
     audit = subparsers.add_parser("audit")
     audit.add_argument("--assessment", type=Path, required=True)
     audit.add_argument("--output", type=Path, required=True)
@@ -498,7 +623,7 @@ def main() -> int:
             if args.output.exists():
                 raise FileExistsError(f"output already exists: {args.output}")
             result = evaluate_evidence(
-                args.evidence_directory, args.config, args.model
+                args.evidence_directory, args.config, args.model, args.backend
             )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(

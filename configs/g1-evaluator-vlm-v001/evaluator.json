@@ -1,7 +1,9 @@
 {
   "schema_version": 1,
   "evaluator_id": "g1-yellow-button-vlm-v001",
+  "backend": "auto",
   "model": "gpt-5.6",
+  "codex_model": "gpt-5.6-sol",
   "image_detail": "high",
   "maximum_panels": 16,
   "pre_roll_seconds": 1.0,
