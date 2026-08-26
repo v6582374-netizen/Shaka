@@ -1,5 +1,7 @@
 # self-evolving-embodied-intelligence-architectural-blueprint
 
+> **文档地位**：本文保留为研究背景与候选机制目录，不再作为首版实施顺序或稳定接口的规范。当前实现以已接受的 ADR 和已关闭的 Wayfinder 决议为准；发生冲突时，优先采用 [ADR-0001](docs/adr/0001-freeze-only-the-physical-research-loop-contracts.md) 与 [ADR-0002](docs/adr/0002-reach-first-success-through-one-vertical-slice.md)。本文中关于设备盖状态、VLA-only、人工预采集评估数据或预建多层平台的旧描述均已被后续决议替代。
+
 > **对齐框架**：宇树"Unitree 自进化循环"（感知 → 决策 → 执行 → 评估 → 学习 → 进化），节点为二级标题
 > **目标平台**：宇树 G1 人形机器人（手臂 + BrainCo 灵巧手，四路相机）
 > **首个目标技能**：点击黄色按钮（当前 0 成功率）
