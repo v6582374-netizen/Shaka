@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from artifact_identity import sha256_file as _sha256_file
+
 CAMERA_FRAME_MAGIC = b"ACF1"
 CAMERA_FRAME_VERSION = 3
 CAMERA_FRAME_PREFIX = struct.Struct("!4sBH")
@@ -211,14 +213,6 @@ def _reader_worker(
                     break
     except Exception as error:  # noqa: BLE001 - surfaced to the main thread
         errors.put(f"{topic_name}: {error}")
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _median_clock_offset_ns(samples: list[int]) -> int:

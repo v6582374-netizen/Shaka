@@ -9,7 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "record_evaluator_episode.py"
+SCRIPTS = Path(__file__).parents[1] / "scripts"
+SCRIPT = SCRIPTS / "record_evaluator_episode.py"
+sys.path.insert(0, str(SCRIPTS))
 SPEC = importlib.util.spec_from_file_location("record_evaluator_episode", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)

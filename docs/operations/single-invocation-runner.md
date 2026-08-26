@@ -17,25 +17,32 @@ manifest validation
 → recorder ready
 → candidate processing
 → control release
-→ evidence completion
-→ controlled evaluation
+→ evidence identity and completeness finalization
+→ four-view evidence preparation
+→ independent multimodal evaluation
 → reset disposition
 → terminal report
 ```
 
-Only `zero-write` is accepted. Five subprocess adapters implement readiness,
-candidate replay, control release, evaluation, and reset disposition. They are
-offline and the runner rejects any replay reporting a created command publisher
-or action write. Candidate replay executes the package's digest-bound Python
-preprocessing and inference callables against a digest-bound saved observation,
-then checks the proposed action without publishing it. The independent
-evaluation adapter remains the only source of `task_result`.
+Only `zero-write` is accepted. The readiness, candidate, release and reset
+adapters are deterministic and offline; none creates a command publisher or
+performs a robot write. Candidate replay executes the package's digest-bound
+Python preprocessing and inference callables against a digest-bound saved
+observation, checks the proposed action without publishing it, and emits a
+controller trace rather than a task result. The independent evaluation adapter
+is the only source of `task_result` and may call the configured OpenAI or Codex
+model provider. After control release and recorder completion, the runner
+verifies the invocation identity and every entry in `sha256.txt`, delegates
+stream-coverage adjudication to the existing episode finalizer, and only then
+calls the existing four-view evidence preparation and multimodal evaluator.
+Controller `aborted`/`abstained` facts and incomplete capture retain priority
+over optimistic visual output.
 
-## Run manifest v1
+## Run manifest v2
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "RUN-001",
   "invocation_id": "INVOCATION-001",
   "execution_mode": "zero-write",
@@ -50,6 +57,11 @@ evaluation adapter remains the only source of `task_result`.
   },
   "task_contract_version": "yellow-button-contact-v001",
   "evaluator_version": "offline-deterministic-v001",
+  "evaluator": {
+    "config_path": "/absolute/path/evaluator.json",
+    "config_sha256": "<sha256>",
+    "prompt_sha256": "<sha256 of adjacent prompt.md>"
+  },
   "standard_start_version": "g1-evaluator-v001",
   "safety_config": {
     "path": "/absolute/path/safety.json",
@@ -159,10 +171,22 @@ A successful run atomically publishes `<output_root>/<run_id>/` with:
 - immutable copies of every candidate artifact and the saved observation;
 - a candidate replay result binding the candidate-package, observation,
   preprocessed-input, and output digests plus validation diagnostics;
-- an append-only audit of all five offline adapters;
+- the finalized invocation evidence and its completeness report;
+- the frozen evaluator configuration and adjacent `prompt.md`;
+- chronological four-view panels with their source-frame manifest;
+- the model's original structured assessment, kept separate from human audit;
+- an append-only audit of all five runner adapters, including the evaluator
+  boundary;
 - complete invocation evidence from the recorder;
 - exactly one `terminal-report.json` containing artifact digests and the final
   zero-write disposition.
+
+If evidence identity or integrity fails, evaluation is not invoked. If the
+model provider is unavailable or evaluation fails, the terminal report records
+the explicit failure reason with `task_result: null`; it does not manufacture a
+five-state result. A successful evaluation adds a compact `evaluation` summary
+to the terminal report while retaining digest-addressed references to the
+configuration, prompt, prepared evidence manifest, and original model result.
 
 Run and invocation identities are append-only. Existing final or partial run
 directories and previously claimed invocation identities are rejected before

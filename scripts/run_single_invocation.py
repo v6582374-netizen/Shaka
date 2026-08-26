@@ -18,10 +18,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
+from artifact_identity import sha256_file as _sha256_file
+from invocation_evaluation import finalize_invocation_evidence
+
 IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 RECORDER = Path(__file__).with_name("record_evaluator_episode.py")
 ADAPTER = Path(__file__).with_name("_offline_invocation_adapter.py")
+TASK_RESULTS = frozenset(
+    {"succeeded", "failed", "indeterminate", "aborted", "abstained"}
+)
 
 
 class ManifestError(ValueError):
@@ -46,6 +52,10 @@ class DeploymentDefect(RuntimeError):
     def __init__(self, result: dict[str, Any]) -> None:
         super().__init__(str(result["reason"]))
         self.result = result
+
+
+class EvaluationFailed(RuntimeError):
+    """Finalized evidence could not produce an independent task result."""
 
 
 @dataclass(frozen=True)
@@ -76,6 +86,8 @@ class ValidatedManifest:
     safety_config: VerifiedArtifact
     budget_artifact: VerifiedArtifact
     evaluator_version: str
+    evaluator_config: VerifiedArtifact
+    evaluator_prompt_content: bytes
     post_roll_s: float
     minimum_camera_frames: int
     minimum_state_samples: int
@@ -96,6 +108,13 @@ class RunPaths:
     candidate_observation: Path
     safety_copy: Path
     budget_copy: Path
+    evaluator_config: Path
+    evaluator_prompt: Path
+    controller_trace: Path
+    controller_stdout: Path
+    evidence_finalization: Path
+    prepared_evidence: Path
+    model_result: Path
     adapter_audit: Path
     recorder_transcript: Path
 
@@ -109,14 +128,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     return parser.parse_args()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _read_object(path: Path, description: str) -> tuple[dict[str, Any], bytes]:
@@ -275,6 +286,23 @@ def _read_verified_object(
     return value
 
 
+def _verified_plain_file(
+    path: Path, expected_digest: Any, description: str
+) -> bytes:
+    if (
+        not isinstance(expected_digest, str)
+        or SHA256_PATTERN.fullmatch(expected_digest) is None
+    ):
+        raise ManifestError(f"{description} sha256 must be a 64-character digest")
+    if not path.is_file():
+        raise ManifestError(f"{description} is missing: {path}")
+    content = path.read_bytes()
+    actual_digest = hashlib.sha256(content).hexdigest()
+    if actual_digest != expected_digest:
+        raise ManifestError(f"{description} digest does not match: {path}")
+    return content
+
+
 def _validate_budget(value: dict[str, Any]) -> None:
     if value.get("schema_version") != 1:
         raise ManifestError("budget artifact schema_version must be 1")
@@ -302,8 +330,8 @@ def _validate_budget(value: dict[str, Any]) -> None:
 def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     manifest_path = manifest_path.resolve()
     manifest, manifest_content = _read_object(manifest_path, "run manifest")
-    if manifest.get("schema_version") != 1:
-        raise ManifestError("run manifest schema_version must be 1")
+    if manifest.get("schema_version") != 2:
+        raise ManifestError("run manifest schema_version must be 2")
 
     run_id = _identity(manifest, "run_id")
     invocation_id = _identity(manifest, "invocation_id")
@@ -365,6 +393,31 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     )
     _validate_budget(budget_artifact.value)
 
+    evaluator = manifest.get("evaluator")
+    if not isinstance(evaluator, dict):
+        raise ManifestError("evaluator must be an object")
+    evaluator_config = _verified_artifact(
+        manifest_path,
+        {
+            "path": evaluator.get("config_path"),
+            "sha256": evaluator.get("config_sha256"),
+        },
+        "evaluator configuration",
+    )
+    evaluator_version = _required_string(manifest, "evaluator_version")
+    if evaluator_config.value.get("schema_version") != 1:
+        raise ManifestError("evaluator configuration schema_version must be 1")
+    if evaluator_config.value.get("evaluator_id") != evaluator_version:
+        raise ManifestError(
+            "evaluator configuration identity does not match evaluator_version"
+        )
+    evaluator_prompt_path = evaluator_config.path.with_name("prompt.md")
+    evaluator_prompt_content = _verified_plain_file(
+        evaluator_prompt_path,
+        evaluator.get("prompt_sha256"),
+        "frozen evaluator prompt",
+    )
+
     recorder = manifest.get("recorder", {})
     if not isinstance(recorder, dict):
         raise ManifestError("recorder must be an object")
@@ -394,7 +447,9 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         candidate_observation=candidate_observation,
         safety_config=safety_config,
         budget_artifact=budget_artifact,
-        evaluator_version=_required_string(manifest, "evaluator_version"),
+        evaluator_version=evaluator_version,
+        evaluator_config=evaluator_config,
+        evaluator_prompt_content=evaluator_prompt_content,
         post_roll_s=float(post_roll_s),
         minimum_camera_frames=minimum_camera_frames,
         minimum_state_samples=minimum_state_samples,
@@ -508,11 +563,17 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
         "candidate_observation": paths.candidate_observation,
         "safety_configuration": paths.safety_copy,
         "budget_artifact": paths.budget_copy,
+        "evaluator_configuration": paths.evaluator_config,
+        "frozen_evaluator_prompt": paths.evaluator_prompt,
         "readiness_result": paths.artifacts / "readiness-result.json",
         "candidate_result": paths.artifacts / "candidate-result.json",
         "control_release": paths.artifacts / "control-release.json",
+        "controller_trace": paths.controller_trace,
+        "controller_stdout": paths.controller_stdout,
         "recorder_lifecycle": paths.recorder_transcript,
+        "evidence_finalization": paths.evidence_finalization,
         "evaluation_result": paths.artifacts / "evaluation-result.json",
+        "model_result": paths.model_result,
         "reset_result": paths.artifacts / "reset-result.json",
         "adapter_audit": paths.adapter_audit,
         "lifecycle_journal": paths.lifecycle,
@@ -541,7 +602,36 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
             artifacts["partial_invocation_evidence"] = {
                 "path": str(partial_evidence.relative_to(paths.partial))
             }
+    prepared_manifest = paths.prepared_evidence / "evidence_manifest.json"
+    if prepared_manifest.is_file():
+        artifacts["prepared_evidence"] = {
+            "path": str(paths.prepared_evidence.relative_to(paths.partial)),
+            "manifest_sha256": _sha256_file(prepared_manifest),
+        }
     return artifacts
+
+
+def _evaluation_summary(paths: RunPaths) -> dict[str, Any] | None:
+    adapter_path = paths.artifacts / "evaluation-result.json"
+    if not adapter_path.is_file() or not paths.model_result.is_file():
+        return None
+    adapter_result = json.loads(adapter_path.read_text(encoding="utf-8"))
+    task_result = adapter_result.get("task_result")
+    if task_result not in TASK_RESULTS:
+        return None
+    return {
+        "evaluator_id": adapter_result["evaluator_version"],
+        "task_result": task_result,
+        "backend": adapter_result["backend"],
+        "model": adapter_result["model"],
+        "human_audit_required": adapter_result["human_audit_required"],
+        "configuration_sha256": adapter_result["configuration_sha256"],
+        "prompt_sha256": adapter_result["prompt_sha256"],
+        "evidence_manifest_sha256": adapter_result[
+            "evidence_manifest_sha256"
+        ],
+        "model_result_sha256": _sha256_file(paths.model_result),
+    }
 
 
 def _terminal_report(
@@ -550,6 +640,7 @@ def _terminal_report(
     completed_stage: str,
     terminal_reason: str,
     task_result: str | None,
+    include_task_result: bool = True,
     **values: Any,
 ) -> dict[str, Any]:
     report = {
@@ -566,8 +657,11 @@ def _terminal_report(
         "artifacts": _existing_artifacts(paths),
         **values,
     }
-    if task_result is not None:
+    if include_task_result:
         report["task_result"] = task_result
+    evaluation = _evaluation_summary(paths)
+    if evaluation is not None:
+        report["evaluation"] = evaluation
     return report
 
 
@@ -591,7 +685,12 @@ def _publish_failure(
         paths,
         completed_stage=progress.completed_stage,
         terminal_reason=reason,
-        task_result=None if deployment_result is not None else "aborted",
+        task_result=(
+            None
+            if deployment_result is not None or isinstance(error, EvaluationFailed)
+            else "aborted"
+        ),
+        include_task_result=deployment_result is None,
         failure_class="deployment_defect" if deployment_result is not None else "runtime_failure",
         physical_rollout_attempts_consumed=0,
         robot_runtime_consumed_s=0,
@@ -651,6 +750,13 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         candidate_observation=artifacts / "candidate-observation.json",
         safety_copy=artifacts / "safety-configuration.json",
         budget_copy=artifacts / "budget-artifact.json",
+        evaluator_config=artifacts / "evaluator" / "evaluator.json",
+        evaluator_prompt=artifacts / "evaluator" / "prompt.md",
+        controller_trace=artifacts / "controller-trace.json",
+        controller_stdout=artifacts / "controller-stdout.jsonl",
+        evidence_finalization=artifacts / "evidence-finalization.json",
+        prepared_evidence=artifacts / "prepared-evidence",
+        model_result=artifacts / "model-assessment.json",
         adapter_audit=artifacts / "adapter-audit.jsonl",
         recorder_transcript=artifacts / "recorder-stdout.jsonl",
     )
@@ -682,6 +788,9 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         paths.candidate_observation.write_bytes(manifest.candidate_observation.content)
         paths.safety_copy.write_bytes(manifest.safety_config.content)
         paths.budget_copy.write_bytes(manifest.budget_artifact.content)
+        paths.evaluator_config.parent.mkdir()
+        paths.evaluator_config.write_bytes(manifest.evaluator_config.content)
+        paths.evaluator_prompt.write_bytes(manifest.evaluator_prompt_content)
         _append_stage(paths.lifecycle, "manifest_validated")
         try:
             claim.mkdir()
@@ -793,6 +902,8 @@ def run(manifest_path: Path) -> dict[str, Any]:
                         str(paths.candidate_runtime),
                         "--observation",
                         str(paths.candidate_observation),
+                        "--controller-trace",
+                        str(paths.controller_trace),
                     ],
                     paths.artifacts / "candidate-result.json",
                     paths,
@@ -820,7 +931,12 @@ def run(manifest_path: Path) -> dict[str, Any]:
 
             release = _run_adapter(
                 "release",
-                [],
+                [
+                    "--controller-trace",
+                    str(paths.controller_trace),
+                    "--controller-stdout",
+                    str(paths.controller_stdout),
+                ],
                 paths.artifacts / "control-release.json",
                 paths,
                 deadline,
@@ -843,32 +959,40 @@ def run(manifest_path: Path) -> dict[str, Any]:
             stderr = recorder.stderr.read() if recorder.stderr is not None else ""
             raise RuntimeError(f"recorder exited with {recorder.returncode}: {stderr}")
 
-        evidence_manifest = paths.evidence_root / manifest.invocation_id / "sha256.txt"
-        if not evidence_manifest.is_file():
-            raise RuntimeError("recorder did not publish complete invocation evidence")
+        evidence_directory = paths.evidence_root / manifest.invocation_id
+        finalization = finalize_invocation_evidence(
+            evidence_directory,
+            manifest.invocation_id,
+            paths.controller_trace,
+            paths.controller_stdout,
+        )
+        _write_json(paths.evidence_finalization, finalization)
         _complete_stage(paths, progress, "evidence_completed")
 
-        evaluation = _run_adapter(
-            "evaluation",
-            [
-                "--evidence-manifest",
-                str(evidence_manifest),
-                "--evaluator-version",
-                manifest.evaluator_version,
-            ],
-            paths.artifacts / "evaluation-result.json",
-            paths,
-            deadline,
-        )
-        task_result = evaluation.get("task_result")
-        if task_result not in {
-            "succeeded",
-            "failed",
-            "indeterminate",
-            "aborted",
-            "abstained",
-        }:
-            raise RuntimeError("evaluation adapter returned an invalid task result")
+        try:
+            evaluation = _run_adapter(
+                "evaluation",
+                [
+                    "--evidence-directory",
+                    str(evidence_directory),
+                    "--invocation-id",
+                    manifest.invocation_id,
+                    "--prepared-evidence-directory",
+                    str(paths.prepared_evidence),
+                    "--evaluator-config",
+                    str(paths.evaluator_config),
+                    "--model-result-output",
+                    str(paths.model_result),
+                ],
+                paths.artifacts / "evaluation-result.json",
+                paths,
+                deadline,
+            )
+            task_result = evaluation.get("task_result")
+            if task_result not in TASK_RESULTS:
+                raise RuntimeError("evaluation adapter returned an invalid task result")
+        except Exception as error:
+            raise EvaluationFailed(str(error)) from error
         _complete_stage(paths, progress, "evaluation_completed")
 
         reset = _run_adapter(

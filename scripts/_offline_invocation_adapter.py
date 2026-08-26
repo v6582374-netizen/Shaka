@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic offline adapters used by the zero-write invocation runner."""
+"""Zero-write runner adapters, including the independent evaluator boundary."""
 
 from __future__ import annotations
 
@@ -14,9 +14,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-
-def _sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+from artifact_identity import sha256_file as _sha256_file
+from invocation_evaluation import evaluate_finalized_invocation
 
 
 def _sha256_json(value: Any) -> str:
@@ -31,6 +30,25 @@ def _read_object(path: Path, description: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{description} must be a JSON object")
     return value
+
+
+def _atomic_replace_json(path: Path, value: dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    os.replace(temporary, path)
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    if path.exists():
+        raise FileExistsError(f"output already exists: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_replace_json(path, value)
+
+
+def _replace_json(path: Path, value: dict[str, Any]) -> None:
+    _atomic_replace_json(path, value)
 
 
 def _audit(adapter: str, outcome: str, result: dict[str, Any] | None = None) -> None:
@@ -105,7 +123,31 @@ def _entrypoint(
     return _load_callable(artifacts[artifact_name], callable_name, stage)
 
 
+def _adapter_plan(adapter: str) -> dict[str, Any]:
+    raw_plan = os.environ.get("SHAKA_OFFLINE_ADAPTER_PLAN")
+    if raw_plan is None:
+        return {}
+    plan = json.loads(raw_plan)
+    if not isinstance(plan, dict):
+        raise TypeError("offline adapter plan must be a JSON object")
+    values = plan.get(adapter, {})
+    if not isinstance(values, dict):
+        raise TypeError(f"offline adapter plan for {adapter} must be an object")
+    delay_s = values.get("delay_s", 0)
+    if not isinstance(delay_s, (int, float)) or delay_s < 0:
+        raise ValueError(f"offline adapter delay for {adapter} must not be negative")
+    if delay_s:
+        time.sleep(float(delay_s))
+    failure = values.get("failure")
+    if failure is not None:
+        if not isinstance(failure, str) or not failure:
+            raise TypeError(f"offline adapter failure for {adapter} must be a string")
+        raise RuntimeError(failure)
+    return values
+
+
 def readiness(args: argparse.Namespace) -> dict[str, Any]:
+    _adapter_plan("readiness")
     claim_directory = args.claim_directory.resolve()
     if args.execution_mode != "zero-write":
         raise ValueError("offline readiness only accepts zero-write mode")
@@ -120,6 +162,7 @@ def readiness(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def candidate(args: argparse.Namespace) -> dict[str, Any]:
+    _adapter_plan("candidate")
     runtime_path = args.runtime_package.resolve()
     observation_path = args.observation.resolve()
     candidate_id: str | None = None
@@ -227,6 +270,24 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             for name in ("task_result", "success", "succeeded")
             if name in output
         }
+        frame_time_ns = time.time_ns()
+        _write_json(
+            args.controller_trace.resolve(),
+            {
+                "schema_version": 1,
+                "protocol": "shaka.offline-controller-trace.v1",
+                "outcome": "running",
+                "checkpoint_digest": package_sha256,
+                "frames": [
+                    {
+                        "phase": "act_task",
+                        "candidate_age_ms": 0.0,
+                        "candidate_source_time_ns": frame_time_ns,
+                        "loop_now_ns": frame_time_ns,
+                    }
+                ],
+            },
+        )
         return _base(
             candidate_id=candidate_id,
             deployment_status="admitted",
@@ -264,28 +325,80 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def release(args: argparse.Namespace) -> dict[str, Any]:
-    del args
-    return _base(released=True, control_authority="released")
+    plan = _adapter_plan("release")
+    if args.controller_trace is None:
+        return _base(released=True, control_authority="released")
+    trace_path = args.controller_trace.resolve()
+    trace = _read_object(trace_path, "controller trace")
+    outcome = plan.get("controller_outcome", "completed")
+    if outcome not in {"completed", "aborted", "abstained", "rejected"}:
+        raise ValueError("offline controller outcome is invalid")
+    end_offset_ns = plan.get("controller_end_offset_ns", 0)
+    if not isinstance(end_offset_ns, int) or isinstance(end_offset_ns, bool):
+        raise TypeError("offline controller end offset must be an integer")
+    frame_time_ns = time.time_ns() + end_offset_ns
+    trace["outcome"] = outcome
+    trace["frames"].append(
+        {
+            "phase": "act_task",
+            "candidate_age_ms": 0.0,
+            "candidate_source_time_ns": frame_time_ns,
+            "loop_now_ns": frame_time_ns,
+        }
+    )
+    _replace_json(trace_path, trace)
+    stdout_path = args.controller_stdout.resolve()
+    stdout_path.write_text(
+        json.dumps(
+            {
+                "protocol": trace["protocol"],
+                "trace_artifact": str(trace_path),
+                "outcome": outcome,
+                "arm_publishers_created": 0,
+                "hand_publishers_created": 0,
+                "arm_writes": 0,
+                "hand_updates": 0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return _base(
+        released=True,
+        control_authority="released",
+        controller_outcome=outcome,
+    )
 
 
 def evaluation(args: argparse.Namespace) -> dict[str, Any]:
-    evidence_manifest = args.evidence_manifest.resolve()
-    if not evidence_manifest.is_file():
-        raise FileNotFoundError("complete evidence manifest is absent")
+    _adapter_plan("evaluation")
+    evaluated = evaluate_finalized_invocation(
+        args.evidence_directory.resolve(),
+        args.invocation_id,
+        args.prepared_evidence_directory.resolve(),
+        args.evaluator_config.resolve(),
+    )
+    model_result = evaluated["model_result"]
+    _write_json(args.model_result_output.resolve(), model_result)
     return _base(
-        evaluator_version=args.evaluator_version,
-        input_manifest_sha256=_sha256_file(evidence_manifest),
-        visual_facts={
-            "contact_visible": "not_evaluated",
-            "retreat_visible": "not_evaluated",
-            "evidence_scope": "offline_zero_write_validation",
-        },
-        task_result="indeterminate",
-        reason="offline zero-write validation does not establish a task outcome",
+        evaluator_version=model_result["evaluator_id"],
+        input_manifest_sha256=evaluated["source_evidence"]["manifest_sha256"],
+        evidence_manifest_sha256=model_result["evidence_manifest_sha256"],
+        configuration_sha256=model_result["configuration_sha256"],
+        prompt_sha256=model_result["prompt_sha256"],
+        backend=model_result["backend"],
+        model=model_result["model"],
+        response_id=model_result["response_id"],
+        visual_facts=model_result["visual_assessment"],
+        task_result=model_result["result"],
+        human_audit_required=model_result["human_audit_required"],
+        model_result_sha256=_sha256_file(args.model_result_output.resolve()),
     )
 
 
 def reset(args: argparse.Namespace) -> dict[str, Any]:
+    _adapter_plan("reset")
     if args.execution_mode != "zero-write":
         raise ValueError("offline reset adapter only accepts zero-write mode")
     return _base(
@@ -306,12 +419,20 @@ def parse_args() -> argparse.Namespace:
     candidate_parser = subparsers.add_parser("candidate")
     candidate_parser.add_argument("--runtime-package", type=Path, required=True)
     candidate_parser.add_argument("--observation", type=Path, required=True)
+    candidate_parser.add_argument("--controller-trace", type=Path, required=True)
 
-    subparsers.add_parser("release")
+    release_parser = subparsers.add_parser("release")
+    release_parser.add_argument("--controller-trace", type=Path)
+    release_parser.add_argument("--controller-stdout", type=Path)
 
     evaluation_parser = subparsers.add_parser("evaluation")
-    evaluation_parser.add_argument("--evidence-manifest", type=Path, required=True)
-    evaluation_parser.add_argument("--evaluator-version", required=True)
+    evaluation_parser.add_argument("--evidence-directory", type=Path, required=True)
+    evaluation_parser.add_argument("--invocation-id", required=True)
+    evaluation_parser.add_argument(
+        "--prepared-evidence-directory", type=Path, required=True
+    )
+    evaluation_parser.add_argument("--evaluator-config", type=Path, required=True)
+    evaluation_parser.add_argument("--model-result-output", type=Path, required=True)
 
     reset_parser = subparsers.add_parser("reset")
     reset_parser.add_argument("--execution-mode", required=True)

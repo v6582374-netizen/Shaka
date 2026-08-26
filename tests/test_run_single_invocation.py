@@ -13,6 +13,19 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "run_single_invocation.py"
 FAKE_RECORDER_RUNTIME = ROOT / "tests" / "support" / "recorder_runtime"
+INDETERMINATE_ASSESSMENT = {
+    "button_visible": True,
+    "designated_finger_visible": None,
+    "contact_observed": None,
+    "contact_panel_indices": [],
+    "retreat_observed": None,
+    "retreat_panel_indices": [],
+    "wrong_finger_contact_observed": None,
+    "visual_evidence_sufficient": False,
+    "visual_result": "indeterminate",
+    "uncertainty_reasons": ["zero-write evidence has no task attempt"],
+    "summary": "no task outcome is visually established",
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -160,11 +173,37 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        evaluator_directory = root / "evaluator"
+        evaluator_directory.mkdir()
+        evaluator_config = evaluator_directory / "evaluator.json"
+        evaluator_config.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "evaluator_id": "offline-deterministic-v001",
+                    "backend": "openai",
+                    "model": "test-model",
+                    "codex_model": "test-codex-model",
+                    "image_detail": "high",
+                    "maximum_panels": 4,
+                    "pre_roll_seconds": 0.0,
+                    "post_roll_seconds": 0.0,
+                    "designated_fingertip": "right_index_fingertip",
+                    "task_contract": "contact then retreat",
+                    "audit_policy": {"mode": "shadow", "audit_all_results": True},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        evaluator_prompt = evaluator_directory / "prompt.md"
+        evaluator_prompt.write_text("judge visual facts\n", encoding="utf-8")
         manifest = root / "run-manifest.json"
         manifest.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "run_id": "RUN-001",
                     "invocation_id": "INVOCATION-001",
                     "execution_mode": "zero-write",
@@ -179,6 +218,11 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                     },
                     "task_contract_version": "yellow-button-contact-v001",
                     "evaluator_version": "offline-deterministic-v001",
+                    "evaluator": {
+                        "config_path": str(evaluator_config),
+                        "config_sha256": sha256_file(evaluator_config),
+                        "prompt_sha256": sha256_file(evaluator_prompt),
+                    },
                     "standard_start_version": "g1-evaluator-v001",
                     "safety_config": {
                         "path": str(safety_config),
@@ -213,6 +257,10 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                 "PYTHONPATH": str(FAKE_RECORDER_RUNTIME),
                 "SHAKA_FAKE_RECORDER_MODE": "healthy",
                 "SHAKA_FAKE_RECORDER_AUDIT": str(root / "recorder-audit.jsonl"),
+                "SHAKA_FAKE_MODEL_ASSESSMENT": json.dumps(
+                    INDETERMINATE_ASSESSMENT
+                ),
+                "OPENAI_API_KEY": "test-key",
             }
         )
         return subprocess.run(
@@ -231,6 +279,10 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                 "PYTHONPATH": str(FAKE_RECORDER_RUNTIME),
                 "SHAKA_FAKE_RECORDER_MODE": "healthy",
                 "SHAKA_FAKE_RECORDER_AUDIT": str(root / "recorder-audit.jsonl"),
+                "SHAKA_FAKE_MODEL_ASSESSMENT": json.dumps(
+                    INDETERMINATE_ASSESSMENT
+                ),
+                "OPENAI_API_KEY": "test-key",
             }
         )
         return subprocess.Popen(

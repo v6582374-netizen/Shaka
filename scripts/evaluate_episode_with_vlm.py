@@ -7,7 +7,6 @@ import argparse
 import base64
 import bisect
 import csv
-import hashlib
 import json
 import os
 import shutil
@@ -17,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from artifact_identity import sha256_file as _sha256_file
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,14 +55,6 @@ class FrameReference:
     path: Path
     frame_time_ns: int
     payload_sha256: str
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _load_config(path: Path) -> dict[str, Any]:
@@ -272,11 +264,26 @@ def prepare_evidence(
         "schema_version": 1,
         "evaluator_id": configuration["evaluator_id"],
         "episode_id": metadata["episode_id"],
-        "source_episode_directory": str(episode_directory.resolve()),
+        "source_episode_directory": os.path.relpath(
+            episode_directory.resolve(), output_directory.resolve()
+        ),
         "source_episode_manifest_sha256": (
             _sha256_file(source_manifest) if source_manifest.is_file() else None
         ),
         "source_capture_metadata_sha256": _sha256_file(metadata_path),
+        "source_invocation_summary": {
+            "controller_outcome": (metadata.get("controller") or {}).get("outcome"),
+            "controller_start_ns": (metadata.get("controller") or {}).get(
+                "estimated_start_ns"
+            ),
+            "controller_end_ns": (metadata.get("controller") or {}).get(
+                "estimated_end_ns"
+            ),
+            "capture_valid": bool(
+                metadata.get("capture_quality", {}).get("valid", False)
+            ),
+            "termination_reason": metadata.get("termination_reason"),
+        },
         "configuration_sha256": _sha256_file(config_path),
         "prompt_sha256": _sha256_file(prompt_path),
         "designated_fingertip": configuration["designated_fingertip"],
@@ -492,11 +499,11 @@ def evaluate_evidence(
         raise ValueError(f"unsupported evaluator backend: {selected_backend}")
     if not isinstance(assessment, VisualAssessment):
         raise TypeError("model response did not contain a parsed visual assessment")
+    source_directory = Path(manifest["source_episode_directory"])
+    if not source_directory.is_absolute():
+        source_directory = (evidence_directory / source_directory).resolve()
     source_metadata = json.loads(
-        (
-            Path(manifest["source_episode_directory"])
-            / "capture_metadata.json"
-        ).read_text(encoding="utf-8")
+        (source_directory / "capture_metadata.json").read_text(encoding="utf-8")
     )
     result = adjudicate(
         bool(manifest["capture_complete"]),

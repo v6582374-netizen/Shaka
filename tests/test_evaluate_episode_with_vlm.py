@@ -13,7 +13,9 @@ from unittest import mock
 
 from PIL import Image
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "evaluate_episode_with_vlm.py"
+SCRIPTS = Path(__file__).parents[1] / "scripts"
+SCRIPT = SCRIPTS / "evaluate_episode_with_vlm.py"
+sys.path.insert(0, str(SCRIPTS))
 SPEC = importlib.util.spec_from_file_location("evaluate_episode_with_vlm", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)

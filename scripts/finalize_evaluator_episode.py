@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import shutil
 import statistics
 from pathlib import Path
 from typing import Any
+
+from artifact_identity import sha256_file as _sha256_file
 
 
 def parse_args() -> argparse.Namespace:
@@ -19,14 +20,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--controller-trace", type=Path, required=True)
     parser.add_argument("--controller-stdout", type=Path, required=True)
     return parser.parse_args()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _write_sha256_manifest(directory: Path) -> None:

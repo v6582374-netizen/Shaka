@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import struct
@@ -12,10 +13,25 @@ import time
 import types
 from pathlib import Path
 
+from PIL import Image
+
 MODE = os.environ.get("SHAKA_FAKE_RECORDER_MODE", "healthy")
 AUDIT_PATH = Path(os.environ["SHAKA_FAKE_RECORDER_AUDIT"])
 LOCK = threading.Lock()
 TOPIC_READS: dict[str, int] = {}
+ORIGINAL_PATH_WRITE_TEXT = Path.write_text
+
+
+def write_text(path: Path, data: str, *args: object, **kwargs: object) -> int:
+    replacement_id = os.environ.get("SHAKA_FAKE_RECORDED_EPISODE_ID")
+    if replacement_id and path.name == "capture_metadata.json":
+        value = json.loads(data)
+        value["episode_id"] = replacement_id
+        data = json.dumps(value, indent=2, sort_keys=True) + "\n"
+    return ORIGINAL_PATH_WRITE_TEXT(path, data, *args, **kwargs)
+
+
+Path.write_text = write_text
 
 
 def audit(event: str, **values: object) -> None:
@@ -175,7 +191,15 @@ class Socket:
     def recv(self) -> bytes:
         self.sequence += 1
         camera_id, width, height = CAMERAS[self.port]
-        payload = f"{camera_id}-{self.sequence}".encode()
+        if camera_id == "head_camera":
+            image = Image.new("RGB", (width, height), "red")
+            image.paste(Image.new("RGB", (width // 2, height), "blue"), (width // 2, 0))
+        else:
+            color = "green" if camera_id == "left_wrist_camera" else "yellow"
+            image = Image.new("RGB", (width, height), color)
+        encoded = io.BytesIO()
+        image.save(encoded, format="JPEG", quality=90)
+        payload = encoded.getvalue()
         now_ns = time.time_ns()
         metadata = {
             "schema": "vegapunk.act.camera_frame.v3",
