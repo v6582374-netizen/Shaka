@@ -212,16 +212,43 @@ class VLMEpisodeEvaluatorTest(unittest.TestCase):
         self.assertEqual(audit["audited_result"], "indeterminate")
         self.assertIn("not live rollout feedback", audit["usage"])
 
-    def test_auto_backend_rejects_without_any_authenticated_provider(self) -> None:
+    def test_codex_backend_inherits_user_provider_config(self) -> None:
+        evidence = self.root / "evidence"
+        manifest = MODULE.prepare_evidence(self.episode, evidence, self.config)
+        captured_command = None
+
+        def run(command: list[str], **_: object) -> object:
+            nonlocal captured_command
+            captured_command = command
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text(self._assessment().model_dump_json())
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(MODULE.shutil, "which", return_value="/bin/codex"),
+            mock.patch.object(MODULE.subprocess, "run", side_effect=run),
+        ):
+            MODULE._evaluate_with_codex_cli(
+                evidence, manifest, "judge visual facts", "test-codex-model"
+            )
+
+        assert captured_command is not None
+        self.assertNotIn("--ignore-user-config", captured_command)
+        self.assertIn("--ephemeral", captured_command)
+        self.assertIn("--ignore-rules", captured_command)
+        self.assertEqual(
+            captured_command[captured_command.index("--sandbox") + 1],
+            "read-only",
+        )
+
+    def test_auto_backend_rejects_without_any_available_provider(self) -> None:
         evidence = self.root / "evidence"
         MODULE.prepare_evidence(self.episode, evidence, self.config)
 
         with (
             mock.patch.dict(os.environ, {}, clear=True),
-            mock.patch.object(
-                MODULE, "_codex_cli_authenticated", return_value=False
-            ),
-            self.assertRaisesRegex(RuntimeError, "authenticated Codex CLI"),
+            mock.patch.object(MODULE.shutil, "which", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "nor Codex CLI"),
         ):
             MODULE.evaluate_evidence(evidence, self.config)
 

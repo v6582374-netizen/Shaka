@@ -23,7 +23,7 @@ python3 scripts/evaluate_episode_with_vlm.py prepare \
 
 ## 模型判断
 
-默认后端为 `auto`：如果存在 `OPENAI_API_KEY`，使用 OpenAI Responses API；否则在本机 Codex CLI 已登录时复用其凭据，通过只读、临时会话完成同一结构化判断。两者都不可用时拒绝运行。
+默认后端为 `auto`：如果存在 `OPENAI_API_KEY`，使用 OpenAI Responses API；否则直接调用本机 Codex CLI，通过只读、临时会话完成同一结构化判断。Codex CLI 会沿用 CC Switch 等工具写入的用户级 provider 配置，不要求 `codex login status` 成功。两者都不可用时拒绝运行。
 
 ```bash
 python3 scripts/evaluate_episode_with_vlm.py evaluate \
@@ -33,7 +33,7 @@ python3 scripts/evaluate_episode_with_vlm.py evaluate \
 
 模型通过 OpenAI Responses API 接收多张 `input_image`，并使用结构化输出生成固定字段。最终结果由本地规则映射为 `succeeded`、`failed`、`indeterminate`、`aborted` 或 `abstained`。
 
-可通过 `--backend openai` 或 `--backend codex-cli` 固定后端。Codex CLI 后端使用 `--ephemeral`、只读沙箱、`--image` 和 `--output-schema`，不加载仓库规则，也不持久化评估会话。
+可通过 `--backend openai` 或 `--backend codex-cli` 固定后端。Codex CLI 后端沿用本机用户配置，并使用 `--ephemeral`、只读沙箱、`--image` 和 `--output-schema`；它不加载仓库规则，也不持久化评估会话。
 
 ## 人工审校
 

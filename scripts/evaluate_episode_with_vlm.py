@@ -362,8 +362,6 @@ def _evaluate_with_codex_cli(
     executable = shutil.which("codex")
     if executable is None:
         raise RuntimeError("Codex CLI is unavailable")
-    if not _codex_cli_authenticated(executable):
-        raise RuntimeError("Codex CLI is not logged in")
     with tempfile.TemporaryDirectory(prefix="shaka-vlm-evaluator-") as temporary:
         temporary_directory = Path(temporary)
         schema_path = temporary_directory / "visual-assessment.schema.json"
@@ -376,7 +374,6 @@ def _evaluate_with_codex_cli(
             executable,
             "exec",
             "--ephemeral",
-            "--ignore-user-config",
             "--ignore-rules",
             "--sandbox",
             "read-only",
@@ -408,23 +405,6 @@ def _evaluate_with_codex_cli(
         return VisualAssessment.model_validate_json(
             output_path.read_text(encoding="utf-8")
         )
-
-
-def _codex_cli_authenticated(executable: str | None = None) -> bool:
-    executable = executable or shutil.which("codex")
-    if executable is None:
-        return False
-    try:
-        completed = subprocess.run(
-            [executable, "login", "status"],
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return completed.returncode == 0
 
 
 def adjudicate(
@@ -474,11 +454,11 @@ def evaluate_evidence(
     if selected_backend == "auto":
         if os.environ.get("OPENAI_API_KEY"):
             selected_backend = "openai"
-        elif _codex_cli_authenticated():
+        elif shutil.which("codex") is not None:
             selected_backend = "codex-cli"
         else:
             raise RuntimeError(
-                "neither OPENAI_API_KEY nor an authenticated Codex CLI is available"
+                "neither OPENAI_API_KEY nor Codex CLI is available"
             )
     if selected_backend == "openai":
         if client is None and not os.environ.get("OPENAI_API_KEY"):
