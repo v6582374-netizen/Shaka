@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 RECORDER = Path(__file__).with_name("record_evaluator_episode.py")
 ADAPTER = Path(__file__).with_name("_offline_invocation_adapter.py")
 
@@ -42,7 +43,6 @@ class VerifiedArtifact:
 @dataclass(frozen=True)
 class ValidatedManifest:
     path: Path
-    value: dict[str, Any]
     sha256: str
     run_id: str
     invocation_id: str
@@ -135,7 +135,10 @@ def _verified_artifact(
         raise ManifestError(f"{description} must be an object")
     path = _artifact_path(manifest_path, value.get("path"), description)
     expected_digest = value.get("sha256")
-    if not isinstance(expected_digest, str) or len(expected_digest) != 64:
+    if (
+        not isinstance(expected_digest, str)
+        or SHA256_PATTERN.fullmatch(expected_digest) is None
+    ):
         raise ManifestError(f"{description} sha256 must be a 64-character digest")
     if not path.is_file():
         raise ManifestError(f"{description} is missing: {path}")
@@ -153,7 +156,10 @@ def _validate_budget(value: dict[str, Any]) -> None:
     if value.get("robot_runtime_budget_s") != 0:
         raise ManifestError("zero-write robot runtime budget must be 0")
     contracts_digest = value.get("frozen_contracts_sha256")
-    if not isinstance(contracts_digest, str) or len(contracts_digest) != 64:
+    if (
+        not isinstance(contracts_digest, str)
+        or SHA256_PATTERN.fullmatch(contracts_digest) is None
+    ):
         raise ManifestError(
             "budget artifact frozen_contracts_sha256 must be a 64-character digest"
         )
@@ -239,7 +245,6 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
 
     return ValidatedManifest(
         path=manifest_path,
-        value=manifest,
         sha256=_sha256_file(manifest_path),
         run_id=run_id,
         invocation_id=invocation_id,
@@ -427,7 +432,7 @@ def _publish_failure(
         paths,
         completed_stage=progress.completed_stage,
         terminal_reason=reason,
-        task_result="not_evaluated",
+        task_result="aborted",
     )
     _write_json(paths.partial / "terminal-report.json", report)
     os.replace(paths.partial, paths.final)
@@ -614,7 +619,13 @@ def run(manifest_path: Path) -> dict[str, Any]:
             deadline,
         )
         task_result = evaluation.get("task_result")
-        if task_result not in {"succeeded", "failed", "indeterminate", "aborted"}:
+        if task_result not in {
+            "succeeded",
+            "failed",
+            "indeterminate",
+            "aborted",
+            "abstained",
+        }:
             raise RuntimeError("evaluation adapter returned an invalid task result")
         _complete_stage(paths, progress, "evaluation_completed")
 

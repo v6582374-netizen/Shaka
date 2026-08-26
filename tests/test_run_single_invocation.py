@@ -406,6 +406,7 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             report = json.loads(reports[0].read_text())
             self.assertEqual(report["completed_stage"], "recorder_ready")
             self.assertIn("must not contain a task result", report["terminal_reason"])
+            self.assertEqual(report["task_result"], "aborted")
             self.assertEqual(report["command_publishers_created"], 0)
             self.assertEqual(report["writes"], 0)
 
