@@ -21,15 +21,116 @@ def sha256_file(path: Path) -> str:
 
 class SingleInvocationRunnerTest(unittest.TestCase):
     def write_fixture(self, root: Path) -> Path:
+        preprocessor = root / "preprocess.py"
+        preprocessor.write_text(
+            """def preprocess(observation, configuration):
+    return {
+        "observation_time_ns": observation["captured_at_ns"],
+        "scale": configuration["scale"],
+    }
+""",
+            encoding="utf-8",
+        )
+        implementation = root / "candidate.py"
+        implementation.write_text(
+            """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [configuration["value"] * model_input["scale"]] * len(configuration["joint_names"]),
+        "task_result": "succeeded",
+        "command_publishers_created": 0,
+        "writes": 0,
+    }
+""",
+            encoding="utf-8",
+        )
+        joint_names = [
+            "right_shoulder_pitch_joint",
+            "right_elbow_joint",
+            "right_wrist_pitch_joint",
+        ]
+        configuration = root / "candidate-config.json"
+        configuration.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "action_definition_id": "g1-right-arm-position-v001",
+                    "joint_names": joint_names,
+                    "scale": 0.5,
+                    "value": 0.2,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        action_definition = root / "action-definition.json"
+        action_definition.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "action_definition_id": "g1-right-arm-position-v001",
+                    "command_type": "joint_position",
+                    "joint_names": joint_names,
+                    "value_dimension": len(joint_names),
+                    "maximum_output_age_ns": 100_000_000,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        observation = root / "saved-observation.json"
+        observation.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "observation_id": "observation-001",
+                    "captured_at_ns": 1_000_000_000,
+                    "robot_state": {"joint_names": joint_names},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         candidate_package = root / "candidate-package.json"
         candidate_package.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
                     "candidate_id": "candidate-v001",
-                    "deployment_evidence": {
-                        "preprocessing": "offline-deterministic",
-                        "output_shape": [26],
+                    "source_version": "fixture-candidate-v001",
+                    "artifacts": {
+                        "implementation": {
+                            "path": implementation.name,
+                            "sha256": sha256_file(implementation),
+                        },
+                        "configuration": {
+                            "path": configuration.name,
+                            "sha256": sha256_file(configuration),
+                        },
+                        "input_preprocessor": {
+                            "path": preprocessor.name,
+                            "sha256": sha256_file(preprocessor),
+                        },
+                        "action_definition": {
+                            "path": action_definition.name,
+                            "sha256": sha256_file(action_definition),
+                        },
+                    },
+                    "runtime": {
+                        "kind": "python-callable-v1",
+                        "preprocess": {
+                            "artifact": "input_preprocessor",
+                            "callable": "preprocess",
+                        },
+                        "inference": {
+                            "artifact": "implementation",
+                            "callable": "infer",
+                        },
                     },
                 },
                 indent=2,
@@ -71,6 +172,10 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                         "candidate_id": "candidate-v001",
                         "package_path": str(candidate_package),
                         "package_sha256": sha256_file(candidate_package),
+                        "observation": {
+                            "path": str(observation),
+                            "sha256": sha256_file(observation),
+                        },
                     },
                     "task_contract_version": "yellow-button-contact-v001",
                     "evaluator_version": "offline-deterministic-v001",
@@ -143,6 +248,60 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
 
+    def replace_candidate_implementation(self, manifest: Path, source: str) -> None:
+        manifest_content = json.loads(manifest.read_text())
+        package_path = Path(manifest_content["candidate"]["package_path"])
+        package = json.loads(package_path.read_text())
+        reference = package["artifacts"]["implementation"]
+        implementation = package_path.parent / reference["path"]
+        implementation.write_text(source, encoding="utf-8")
+        reference["sha256"] = sha256_file(implementation)
+        package_path.write_text(
+            json.dumps(package, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        manifest_content["candidate"]["package_sha256"] = sha256_file(package_path)
+        manifest.write_text(
+            json.dumps(manifest_content, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def assert_candidate_deployment_defect(
+        self,
+        root: Path,
+        manifest: Path,
+        reason: str,
+        *,
+        publishers: int = 0,
+        writes: int = 0,
+    ) -> None:
+        completed = self.run_cli(root, manifest)
+
+        self.assertEqual(completed.returncode, 2)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["result"], "zero_write_candidate_rejected")
+        self.assertEqual(result["failure_class"], "deployment_defect")
+        self.assertEqual(result["physical_rollout_attempts_consumed"], 0)
+        self.assertEqual(result["robot_runtime_consumed_s"], 0)
+        self.assertEqual(result["command_publishers_created"], publishers)
+        self.assertEqual(result["writes"], writes)
+        run_directory = root / "runs" / "RUN-001"
+        report = json.loads((run_directory / "terminal-report.json").read_text())
+        self.assertNotIn("task_result", report)
+        self.assertEqual(report["failure_class"], "deployment_defect")
+        self.assertEqual(report["physical_rollout_attempts_consumed"], 0)
+        self.assertEqual(report["robot_runtime_consumed_s"], 0)
+        self.assertEqual(report["command_publishers_created"], publishers)
+        self.assertEqual(report["writes"], writes)
+        candidate_result = json.loads(
+            (run_directory / "artifacts" / "candidate-result.json").read_text()
+        )
+        self.assertEqual(candidate_result["deployment_status"], "rejected")
+        self.assertEqual(candidate_result["failure_class"], "deployment_defect")
+        self.assertIn(reason, candidate_result["reason"])
+        self.assertEqual(len(candidate_result["candidate_output_sha256"]), 64)
+        self.assertEqual(candidate_result["command_publishers_created"], publishers)
+        self.assertEqual(candidate_result["writes"], writes)
+
     def test_runs_one_complete_zero_write_invocation_through_the_public_cli(
         self,
     ) -> None:
@@ -202,6 +361,34 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                 report["artifacts"]["candidate_package"]["sha256"],
                 manifest_content["candidate"]["package_sha256"],
             )
+            candidate_result_path = (
+                run_directory / report["artifacts"]["candidate_result"]["path"]
+            )
+            candidate_result = json.loads(candidate_result_path.read_text())
+            self.assertEqual(candidate_result["deployment_status"], "admitted")
+            self.assertEqual(
+                candidate_result["candidate_package_sha256"],
+                manifest_content["candidate"]["package_sha256"],
+            )
+            self.assertEqual(
+                candidate_result["input_observation_sha256"],
+                manifest_content["candidate"]["observation"]["sha256"],
+            )
+            self.assertEqual(len(candidate_result["candidate_output_sha256"]), 64)
+            self.assertEqual(
+                candidate_result["diagnostics"],
+                {
+                    "action_definition_id": "g1-right-arm-position-v001",
+                    "inference": "completed",
+                    "output_validation": "compatible",
+                    "preprocessing": "completed",
+                },
+            )
+            self.assertEqual(
+                candidate_result["ignored_candidate_claims"],
+                {"task_result": "succeeded"},
+            )
+            self.assertNotIn("task_result", candidate_result)
             self.assertEqual(
                 report["artifacts"]["safety_configuration"]["sha256"],
                 manifest_content["safety_config"]["sha256"],
@@ -343,6 +530,57 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             self.assertFalse((root / "recorder-audit.jsonl").exists())
             self.assertFalse((root / "runs").exists())
 
+    def test_rejects_a_missing_candidate_artifact_before_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            (root / "candidate.py").unlink()
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            result = json.loads(completed.stdout)
+            self.assertIn("candidate artifact 'implementation' is missing", result["reason"])
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_rejects_a_candidate_artifact_digest_mismatch_before_recording(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            (root / "preprocess.py").write_text("def preprocess(): pass\n")
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            result = json.loads(completed.stdout)
+            self.assertIn(
+                "candidate artifact 'input_preprocessor' digest does not match",
+                result["reason"],
+            )
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_rejects_a_run_manifest_candidate_identity_mismatch_before_recording(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            content = json.loads(manifest.read_text())
+            content["candidate"]["candidate_id"] = "candidate-v999"
+            manifest.write_text(json.dumps(content), encoding="utf-8")
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            result = json.loads(completed.stdout)
+            self.assertIn("identity does not match", result["reason"])
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
     def test_rejects_a_reused_invocation_identity_without_overwriting_evidence(
         self,
     ) -> None:
@@ -397,7 +635,9 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                 (root / "recorder-audit.jsonl").read_bytes(), recorder_audit
             )
 
-    def test_rejects_a_candidate_attempt_to_supply_the_task_result(self) -> None:
+    def test_rejects_a_package_attempt_to_supply_the_task_result_before_recording(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manifest = self.write_fixture(root)
@@ -416,17 +656,154 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             self.assertIn("must not contain a task result", result["reason"])
             self.assertEqual(result["command_publishers_created"], 0)
             self.assertEqual(result["writes"], 0)
-            run_directory = root / "runs" / "RUN-001"
-            self.assertTrue(run_directory.is_dir())
-            self.assertFalse((root / "runs" / ".RUN-001.partial").exists())
-            reports = list(run_directory.glob("terminal-report*.json"))
-            self.assertEqual(len(reports), 1)
-            report = json.loads(reports[0].read_text())
-            self.assertEqual(report["completed_stage"], "recorder_ready")
-            self.assertIn("must not contain a task result", report["terminal_reason"])
-            self.assertEqual(report["task_result"], "aborted")
-            self.assertEqual(report["command_publishers_created"], 0)
-            self.assertEqual(report["writes"], 0)
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_dimension_error_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1],
+        "command_publishers_created": 0,
+        "writes": 0,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "dimension")
+
+    def test_non_finite_output_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, float("nan"), 0.3],
+        "command_publishers_created": 0,
+        "writes": 0,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "finite")
+
+    def test_stale_timestamp_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"] - 200_000_000,
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+        "command_publishers_created": 0,
+        "writes": 0,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "stale")
+
+    def test_joint_order_error_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": list(reversed(configuration["joint_names"])),
+        "values": [0.1, 0.2, 0.3],
+        "command_publishers_created": 0,
+        "writes": 0,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "joint names or order")
+
+    def test_action_definition_mismatch_is_a_zero_budget_deployment_defect(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": "incompatible-action-v999",
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+        "command_publishers_created": 0,
+        "writes": 0,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "incompatible")
+
+    def test_nonzero_write_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+        "command_publishers_created": 0,
+        "writes": 1,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(
+                root, manifest, "zero-write", writes=1
+            )
+
+    def test_nonzero_publisher_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+        "command_publishers_created": 1,
+        "writes": 0,
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(
+                root, manifest, "zero-write", publishers=1
+            )
 
     def test_interrupting_an_accepted_run_publishes_one_terminal_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

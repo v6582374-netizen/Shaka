@@ -40,11 +40,23 @@ class InvocationInterrupted(RuntimeError):
     """The runner received a process signal after accepting the invocation."""
 
 
+class DeploymentDefect(RuntimeError):
+    """Candidate replay failed before consuming a physical attempt."""
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        super().__init__(str(result["reason"]))
+        self.result = result
+
+
 @dataclass(frozen=True)
-class VerifiedArtifact:
+class VerifiedFile:
     path: Path
     sha256: str
     content: bytes
+
+
+@dataclass(frozen=True)
+class VerifiedArtifact(VerifiedFile):
     value: dict[str, Any]
 
 
@@ -59,6 +71,8 @@ class ValidatedManifest:
     maximum_duration_s: float
     candidate_id: str
     candidate_package: VerifiedArtifact
+    candidate_artifacts: dict[str, VerifiedFile]
+    candidate_observation: VerifiedArtifact
     safety_config: VerifiedArtifact
     budget_artifact: VerifiedArtifact
     evaluator_version: str
@@ -77,6 +91,9 @@ class RunPaths:
     evidence_root: Path
     manifest_copy: Path
     candidate_copy: Path
+    candidate_bundle: Path
+    candidate_runtime: Path
+    candidate_observation: Path
     safety_copy: Path
     budget_copy: Path
     adapter_audit: Path
@@ -141,6 +158,24 @@ def _artifact_path(manifest_path: Path, value: Any, description: str) -> Path:
 def _verified_artifact(
     manifest_path: Path, value: Any, description: str
 ) -> VerifiedArtifact:
+    verified = _verified_file(manifest_path, value, description)
+    try:
+        artifact_value = json.loads(verified.content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ManifestError(f"{description} is not valid JSON: {verified.path}") from error
+    if not isinstance(artifact_value, dict):
+        raise ManifestError(f"{description} must be a JSON object")
+    return VerifiedArtifact(
+        verified.path,
+        verified.sha256,
+        verified.content,
+        artifact_value,
+    )
+
+
+def _verified_file(
+    manifest_path: Path, value: Any, description: str
+) -> VerifiedFile:
     if not isinstance(value, dict):
         raise ManifestError(f"{description} must be an object")
     path = _artifact_path(manifest_path, value.get("path"), description)
@@ -150,11 +185,94 @@ def _verified_artifact(
         or SHA256_PATTERN.fullmatch(expected_digest) is None
     ):
         raise ManifestError(f"{description} sha256 must be a 64-character digest")
-    value, content = _read_object(path, description)
+    if not path.is_file():
+        raise ManifestError(f"{description} is missing: {path}")
+    content = path.read_bytes()
     actual_digest = hashlib.sha256(content).hexdigest()
     if actual_digest != expected_digest:
         raise ManifestError(f"{description} digest does not match: {path}")
-    return VerifiedArtifact(path, actual_digest, content, value)
+    return VerifiedFile(path, actual_digest, content)
+
+
+def _candidate_artifacts(package: VerifiedArtifact) -> dict[str, VerifiedFile]:
+    if "task_result" in package.value:
+        raise ManifestError("candidate package must not contain a task result")
+    source_version = package.value.get("source_version")
+    if not isinstance(source_version, str) or not source_version:
+        raise ManifestError("candidate package source_version must be non-empty")
+    references = package.value.get("artifacts")
+    if not isinstance(references, dict):
+        raise ManifestError("candidate package artifacts must be an object")
+    required = {"configuration", "input_preprocessor", "action_definition"}
+    if not required.issubset(references):
+        missing = ", ".join(sorted(required - references.keys()))
+        raise ManifestError(f"candidate package is missing required artifacts: {missing}")
+    if "implementation" not in references and "model" not in references:
+        raise ManifestError("candidate package must bind an implementation or model")
+
+    artifacts: dict[str, VerifiedFile] = {}
+    for name, reference in references.items():
+        if not isinstance(name, str) or IDENTITY_PATTERN.fullmatch(name) is None:
+            raise ManifestError("candidate artifact names must be valid identities")
+        artifacts[name] = _verified_file(
+            package.path, reference, f"candidate artifact '{name}'"
+        )
+
+    runtime = package.value.get("runtime")
+    if not isinstance(runtime, dict) or runtime.get("kind") != "python-callable-v1":
+        raise ManifestError("candidate runtime kind must be 'python-callable-v1'")
+    for stage in ("preprocess", "inference"):
+        entrypoint = runtime.get(stage)
+        if not isinstance(entrypoint, dict):
+            raise ManifestError(f"candidate runtime {stage} must be an object")
+        artifact_name = entrypoint.get("artifact")
+        callable_name = entrypoint.get("callable")
+        if artifact_name not in artifacts:
+            raise ManifestError(
+                f"candidate runtime {stage} references an unknown artifact"
+            )
+        if (
+            not isinstance(callable_name, str)
+            or not callable_name.isidentifier()
+        ):
+            raise ManifestError(
+                f"candidate runtime {stage} callable must be a Python identifier"
+            )
+
+    action = _read_verified_object(artifacts["action_definition"], "action definition")
+    if action.get("schema_version") != 1:
+        raise ManifestError("candidate action definition schema_version must be 1")
+    action_id = action.get("action_definition_id")
+    joint_names = action.get("joint_names")
+    dimension = action.get("value_dimension")
+    maximum_age = action.get("maximum_output_age_ns")
+    if not isinstance(action_id, str) or not action_id:
+        raise ManifestError("candidate action definition id must be non-empty")
+    if (
+        not isinstance(joint_names, list)
+        or not joint_names
+        or any(not isinstance(name, str) or not name for name in joint_names)
+        or len(set(joint_names)) != len(joint_names)
+    ):
+        raise ManifestError("candidate action definition joint_names must be unique")
+    if dimension != len(joint_names):
+        raise ManifestError("candidate action definition dimension must match joints")
+    if not isinstance(maximum_age, int) or maximum_age < 0:
+        raise ManifestError("candidate maximum_output_age_ns must not be negative")
+    _read_verified_object(artifacts["configuration"], "candidate configuration")
+    return artifacts
+
+
+def _read_verified_object(
+    artifact: VerifiedFile, description: str
+) -> dict[str, Any]:
+    try:
+        value = json.loads(artifact.content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ManifestError(f"{description} is not valid JSON: {artifact.path}") from error
+    if not isinstance(value, dict):
+        raise ManifestError(f"{description} must be a JSON object")
+    return value
 
 
 def _validate_budget(value: dict[str, Any]) -> None:
@@ -224,8 +342,16 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         raise ManifestError(
             "candidate package identity does not match the run manifest"
         )
-    if not isinstance(package.get("deployment_evidence"), dict):
-        raise ManifestError("candidate package deployment_evidence must be an object")
+    candidate_artifacts = _candidate_artifacts(candidate_package)
+    candidate_observation = _verified_artifact(
+        manifest_path, candidate.get("observation"), "candidate observation"
+    )
+    observation = candidate_observation.value
+    if observation.get("schema_version") != 1:
+        raise ManifestError("candidate observation schema_version must be 1")
+    captured_at_ns = observation.get("captured_at_ns")
+    if not isinstance(captured_at_ns, int) or captured_at_ns < 0:
+        raise ManifestError("candidate observation captured_at_ns must not be negative")
 
     safety_config = _verified_artifact(
         manifest_path, manifest.get("safety_config"), "safety configuration"
@@ -264,6 +390,8 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         maximum_duration_s=float(maximum_duration_s),
         candidate_id=candidate_id,
         candidate_package=candidate_package,
+        candidate_artifacts=candidate_artifacts,
+        candidate_observation=candidate_observation,
         safety_config=safety_config,
         budget_artifact=budget_artifact,
         evaluator_version=_required_string(manifest, "evaluator_version"),
@@ -360,6 +488,8 @@ def _run_adapter(
     _write_json(output_path, result)
     if completed.returncode != 0:
         reason = result.get("reason", completed.stderr.strip())
+        if adapter == "candidate" and result.get("failure_class") == "deployment_defect":
+            raise DeploymentDefect(result)
         raise RuntimeError(f"{adapter} adapter failed: {reason}")
     if result.get("command_publishers_created") != 0 or result.get("writes") != 0:
         raise RuntimeError(f"{adapter} adapter violated zero-write mode")
@@ -374,6 +504,8 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
     candidates = {
         "run_manifest": paths.manifest_copy,
         "candidate_package": paths.candidate_copy,
+        "candidate_runtime": paths.candidate_runtime,
+        "candidate_observation": paths.candidate_observation,
         "safety_configuration": paths.safety_copy,
         "budget_artifact": paths.budget_copy,
         "readiness_result": paths.artifacts / "readiness-result.json",
@@ -390,6 +522,12 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
         for name, path in candidates.items()
         if path.is_file()
     }
+    if paths.candidate_bundle.is_dir():
+        for path in sorted(paths.candidate_bundle.iterdir()):
+            if path.is_file():
+                artifacts[f"candidate_artifact_{path.stem}"] = _artifact(
+                    path, paths.partial
+                )
     evidence = paths.evidence_root / paths.claim.name
     evidence_manifest = evidence / "sha256.txt"
     if evidence_manifest.is_file():
@@ -411,9 +549,10 @@ def _terminal_report(
     paths: RunPaths,
     completed_stage: str,
     terminal_reason: str,
-    task_result: str,
+    task_result: str | None,
+    **values: Any,
 ) -> dict[str, Any]:
-    return {
+    report = {
         "schema_version": 1,
         "run_id": manifest.run_id,
         "invocation_id": manifest.invocation_id,
@@ -421,12 +560,15 @@ def _terminal_report(
         "manifest_sha256": manifest.sha256,
         "completed_stage": completed_stage,
         "terminal_reason": terminal_reason,
-        "task_result": task_result,
         "next_disposition": "stop_zero_write_validation",
-        "command_publishers_created": 0,
-        "writes": 0,
+        "command_publishers_created": values.pop("command_publishers_created", 0),
+        "writes": values.pop("writes", 0),
         "artifacts": _existing_artifacts(paths),
+        **values,
     }
+    if task_result is not None:
+        report["task_result"] = task_result
+    return report
 
 
 def _publish_failure(
@@ -436,25 +578,42 @@ def _publish_failure(
     error: BaseException,
 ) -> NoReturn:
     reason = str(error) or type(error).__name__
+    deployment_result = error.result if isinstance(error, DeploymentDefect) else None
+    publishers = (
+        deployment_result.get("command_publishers_created", 0)
+        if deployment_result is not None
+        else 0
+    )
+    writes = deployment_result.get("writes", 0) if deployment_result is not None else 0
     _append_stage(paths.lifecycle, "terminal_report_prepared", outcome="failed")
     report = _terminal_report(
         manifest,
         paths,
         completed_stage=progress.completed_stage,
         terminal_reason=reason,
-        task_result="aborted",
+        task_result=None if deployment_result is not None else "aborted",
+        failure_class="deployment_defect" if deployment_result is not None else "runtime_failure",
+        physical_rollout_attempts_consumed=0,
+        robot_runtime_consumed_s=0,
+        command_publishers_created=publishers,
+        writes=writes,
     )
     _write_json(paths.partial / "terminal-report.json", report)
     os.replace(paths.partial, paths.final)
     raise InvocationFailed(
         {
-            "result": "zero_write_invocation_failed",
+            "result": "zero_write_candidate_rejected"
+            if deployment_result is not None
+            else "zero_write_invocation_failed",
             "reason": reason,
             "run_id": manifest.run_id,
             "invocation_id": manifest.invocation_id,
             "output_directory": str(paths.final),
-            "command_publishers_created": 0,
-            "writes": 0,
+            "failure_class": report["failure_class"],
+            "physical_rollout_attempts_consumed": 0,
+            "robot_runtime_consumed_s": 0,
+            "command_publishers_created": publishers,
+            "writes": writes,
         }
     ) from error
 
@@ -487,6 +646,9 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         evidence_root=partial / "evidence",
         manifest_copy=partial / "run-manifest.json",
         candidate_copy=artifacts / "candidate-package.json",
+        candidate_bundle=artifacts / "candidate-bundle",
+        candidate_runtime=artifacts / "candidate-runtime.json",
+        candidate_observation=artifacts / "candidate-observation.json",
         safety_copy=artifacts / "safety-configuration.json",
         budget_copy=artifacts / "budget-artifact.json",
         adapter_audit=artifacts / "adapter-audit.jsonl",
@@ -497,6 +659,27 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         artifacts.mkdir()
         paths.manifest_copy.write_bytes(manifest.content)
         paths.candidate_copy.write_bytes(manifest.candidate_package.content)
+        paths.candidate_bundle.mkdir()
+        runtime_artifacts: dict[str, dict[str, str]] = {}
+        for name, artifact in manifest.candidate_artifacts.items():
+            destination = paths.candidate_bundle / f"{name}{artifact.path.suffix}"
+            destination.write_bytes(artifact.content)
+            runtime_artifacts[name] = {
+                "path": str(destination.relative_to(paths.artifacts)),
+                "sha256": artifact.sha256,
+            }
+        _write_json(
+            paths.candidate_runtime,
+            {
+                "schema_version": 1,
+                "candidate_id": manifest.candidate_id,
+                "candidate_package_sha256": manifest.candidate_package.sha256,
+                "source_version": manifest.candidate_package.value["source_version"],
+                "artifacts": runtime_artifacts,
+                "runtime": manifest.candidate_package.value["runtime"],
+            },
+        )
+        paths.candidate_observation.write_bytes(manifest.candidate_observation.content)
         paths.safety_copy.write_bytes(manifest.safety_config.content)
         paths.budget_copy.write_bytes(manifest.budget_artifact.content)
         _append_stage(paths.lifecycle, "manifest_validated")
@@ -602,16 +785,36 @@ def run(manifest_path: Path) -> dict[str, Any]:
                     )
             _complete_stage(paths, progress, "recorder_ready")
 
-            candidate_result = _run_adapter(
-                "candidate",
-                ["--package", str(paths.candidate_copy)],
-                paths.artifacts / "candidate-result.json",
-                paths,
-                deadline,
-            )
+            try:
+                candidate_result = _run_adapter(
+                    "candidate",
+                    [
+                        "--runtime-package",
+                        str(paths.candidate_runtime),
+                        "--observation",
+                        str(paths.candidate_observation),
+                    ],
+                    paths.artifacts / "candidate-result.json",
+                    paths,
+                    deadline,
+                )
+            except DeploymentDefect:
+                release = _run_adapter(
+                    "release",
+                    [],
+                    paths.artifacts / "control-release.json",
+                    paths,
+                    deadline,
+                )
+                if release.get("released") is not True:
+                    raise RuntimeError(
+                        "control release adapter did not release authority"
+                    )
+                _complete_stage(paths, progress, "control_released")
+                raise
             if candidate_result.get("candidate_id") != manifest.candidate_id:
                 raise RuntimeError("candidate adapter returned the wrong identity")
-            if candidate_result.get("deployment_status") != "completed":
+            if candidate_result.get("deployment_status") != "admitted":
                 raise RuntimeError("candidate deployment did not complete")
             _complete_stage(paths, progress, "candidate_completed")
 

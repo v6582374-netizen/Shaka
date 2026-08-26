@@ -23,14 +23,13 @@ manifest validation
 → terminal report
 ```
 
-Only `zero-write` is accepted. Five deterministic subprocess adapters implement
-readiness, candidate processing, control release, evaluation, and reset
-disposition. They are offline, create no command publisher, and perform no
-robot write. The candidate adapter reads only the digest-bound candidate JSON;
-the package cannot name or execute an arbitrary entrypoint and cannot supply a
-task result. The evaluation adapter binds its result to the complete evidence
-manifest and returns structured visual facts plus `indeterminate`, because an
-offline zero-write run does not establish physical task success.
+Only `zero-write` is accepted. Five subprocess adapters implement readiness,
+candidate replay, control release, evaluation, and reset disposition. They are
+offline and the runner rejects any replay reporting a created command publisher
+or action write. Candidate replay executes the package's digest-bound Python
+preprocessing and inference callables against a digest-bound saved observation,
+then checks the proposed action without publishing it. The independent
+evaluation adapter remains the only source of `task_result`.
 
 ## Run manifest v1
 
@@ -43,7 +42,11 @@ offline zero-write run does not establish physical task success.
   "candidate": {
     "candidate_id": "candidate-v001",
     "package_path": "/absolute/path/candidate-package.json",
-    "package_sha256": "<sha256>"
+    "package_sha256": "<sha256>",
+    "observation": {
+      "path": "/absolute/path/saved-observation.json",
+      "sha256": "<sha256>"
+    }
   },
   "task_contract_version": "yellow-button-contact-v001",
   "evaluator_version": "offline-deterministic-v001",
@@ -68,19 +71,71 @@ offline zero-write run does not establish physical task success.
 }
 ```
 
-Relative artifact paths are resolved from the manifest directory. A candidate
-package is also versioned JSON:
+Relative run-manifest paths are resolved from the manifest directory. A
+candidate package is versioned JSON and binds its source version, implementation
+or model, candidate-specific configuration, input preprocessing, action
+definition, and runtime callables:
 
 ```json
 {
   "schema_version": 1,
   "candidate_id": "candidate-v001",
-  "deployment_evidence": {
-    "preprocessing": "offline-deterministic",
-    "output_shape": [26]
+  "source_version": "git:0123456789abcdef",
+  "artifacts": {
+    "implementation": {
+      "path": "candidate.py",
+      "sha256": "<sha256>"
+    },
+    "configuration": {
+      "path": "candidate-config.json",
+      "sha256": "<sha256>"
+    },
+    "input_preprocessor": {
+      "path": "preprocess.py",
+      "sha256": "<sha256>"
+    },
+    "action_definition": {
+      "path": "action-definition.json",
+      "sha256": "<sha256>"
+    }
+  },
+  "runtime": {
+    "kind": "python-callable-v1",
+    "preprocess": {
+      "artifact": "input_preprocessor",
+      "callable": "preprocess"
+    },
+    "inference": {
+      "artifact": "implementation",
+      "callable": "infer"
+    }
   }
 }
 ```
+
+Artifact paths in the candidate package are resolved from the package
+directory. The package may additionally bind a `model` artifact; the public
+contract does not depend on a VLA, behavior-cloning, reinforcement-learning, or
+other framework. `preprocess(observation, configuration)` returns the real model
+input, and `infer(model_input, configuration)` returns one proposed command:
+
+```json
+{
+  "action_definition_id": "g1-arm-position-v001",
+  "timestamp_ns": 1000000000,
+  "joint_names": ["..."],
+  "values": [0.0],
+  "command_publishers_created": 0,
+  "writes": 0
+}
+```
+
+The action definition freezes the command type, joint names and order, value
+dimension, and maximum allowed output age. Admission rejects incompatible
+action definitions, wrong dimensions, non-finite values, stale timestamps,
+wrong joint order, nonzero publisher counts, and nonzero writes. Any candidate
+success claim is retained only under `ignored_candidate_claims`; it never enters
+the task-result field.
 
 The versioned budget artifact binds the zero-write limits and frozen contracts:
 
@@ -101,6 +156,9 @@ A successful run atomically publishes `<output_root>/<run_id>/` with:
 - the accepted manifest;
 - an append-only `lifecycle.jsonl` journal;
 - candidate, control-release, recorder and evaluation artifacts;
+- immutable copies of every candidate artifact and the saved observation;
+- a candidate replay result binding the candidate-package, observation,
+  preprocessed-input, and output digests plus validation diagnostics;
 - an append-only audit of all five offline adapters;
 - complete invocation evidence from the recorder;
 - exactly one `terminal-report.json` containing artifact digests and the final
@@ -112,3 +170,8 @@ the recorder starts. Once identity authority has been acquired, any later
 failure atomically publishes the run directory with its last completed stage
 and exactly one failure terminal report instead of leaving an ambiguous partial
 run.
+
+An invalid candidate output produces a `deployment_defect` terminal report with
+no `task_result`. It records zero physical rollout attempts and zero robot
+runtime consumption, releases invocation authority, and stops before independent
+task evaluation.
