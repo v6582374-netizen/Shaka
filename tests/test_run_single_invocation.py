@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -116,6 +117,23 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             text=True,
             timeout=5,
             check=False,
+        )
+
+    def start_cli(self, root: Path, manifest: Path) -> subprocess.Popen[str]:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "PYTHONPATH": str(FAKE_RECORDER_RUNTIME),
+                "SHAKA_FAKE_RECORDER_MODE": "healthy",
+                "SHAKA_FAKE_RECORDER_AUDIT": str(root / "recorder-audit.jsonl"),
+            }
+        )
+        return subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--manifest", str(manifest)],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
 
     def update_manifest(self, manifest: Path, **values: object) -> None:
@@ -409,6 +427,35 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             self.assertEqual(report["task_result"], "aborted")
             self.assertEqual(report["command_publishers_created"], 0)
             self.assertEqual(report["writes"], 0)
+
+    def test_interrupting_an_accepted_run_publishes_one_terminal_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            process = self.start_cli(root, manifest)
+            audit_path = root / "runs" / ".RUN-001.partial" / "artifacts"
+            audit_path /= "adapter-audit.jsonl"
+            deadline = time.monotonic() + 2
+            while not audit_path.is_file():
+                self.assertIsNone(process.poll(), "runner exited before acceptance")
+                self.assertLess(time.monotonic(), deadline, "runner was not accepted")
+                time.sleep(0.01)
+
+            process.terminate()
+            stdout, stderr = process.communicate(timeout=5)
+
+            self.assertEqual(process.returncode, 2, stderr)
+            result = json.loads(stdout)
+            self.assertEqual(result["result"], "zero_write_invocation_failed")
+            self.assertIn("SIGTERM", result["reason"])
+            run_directory = root / "runs" / "RUN-001"
+            self.assertTrue(run_directory.is_dir())
+            self.assertFalse((root / "runs" / ".RUN-001.partial").exists())
+            reports = list(run_directory.glob("terminal-report*.json"))
+            self.assertEqual(len(reports), 1)
+            report = json.loads(reports[0].read_text())
+            self.assertEqual(report["task_result"], "aborted")
+            self.assertIn("SIGTERM", report["terminal_reason"])
 
 
 if __name__ == "__main__":

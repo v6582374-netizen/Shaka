@@ -9,6 +9,8 @@ import json
 import os
 import re
 import selectors
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -34,16 +36,23 @@ class InvocationFailed(RuntimeError):
         self.result = result
 
 
+class InvocationInterrupted(RuntimeError):
+    """The runner received a process signal after accepting the invocation."""
+
+
 @dataclass(frozen=True)
 class VerifiedArtifact:
     path: Path
     sha256: str
+    content: bytes
+    value: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class ValidatedManifest:
     path: Path
     sha256: str
+    content: bytes
     run_id: str
     invocation_id: str
     output_root: Path
@@ -93,16 +102,17 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_object(path: Path, description: str) -> dict[str, Any]:
+def _read_object(path: Path, description: str) -> tuple[dict[str, Any], bytes]:
     if not path.is_file():
         raise ManifestError(f"{description} is missing: {path}")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+        content = path.read_bytes()
+        value = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ManifestError(f"{description} is not valid JSON: {path}") from error
     if not isinstance(value, dict):
         raise ManifestError(f"{description} must be a JSON object")
-    return value
+    return value, content
 
 
 def _required_string(value: dict[str, Any], name: str) -> str:
@@ -140,12 +150,11 @@ def _verified_artifact(
         or SHA256_PATTERN.fullmatch(expected_digest) is None
     ):
         raise ManifestError(f"{description} sha256 must be a 64-character digest")
-    if not path.is_file():
-        raise ManifestError(f"{description} is missing: {path}")
-    actual_digest = _sha256_file(path)
+    value, content = _read_object(path, description)
+    actual_digest = hashlib.sha256(content).hexdigest()
     if actual_digest != expected_digest:
         raise ManifestError(f"{description} digest does not match: {path}")
-    return VerifiedArtifact(path, actual_digest)
+    return VerifiedArtifact(path, actual_digest, content, value)
 
 
 def _validate_budget(value: dict[str, Any]) -> None:
@@ -174,7 +183,7 @@ def _validate_budget(value: dict[str, Any]) -> None:
 
 def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     manifest_path = manifest_path.resolve()
-    manifest = _read_object(manifest_path, "run manifest")
+    manifest, manifest_content = _read_object(manifest_path, "run manifest")
     if manifest.get("schema_version") != 1:
         raise ManifestError("run manifest schema_version must be 1")
 
@@ -208,7 +217,7 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         },
         "candidate package",
     )
-    package = _read_object(candidate_package.path, "candidate package")
+    package = candidate_package.value
     if package.get("schema_version") != 1:
         raise ManifestError("candidate package schema_version must be 1")
     if package.get("candidate_id") != candidate_id:
@@ -221,14 +230,14 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     safety_config = _verified_artifact(
         manifest_path, manifest.get("safety_config"), "safety configuration"
     )
-    safety = _read_object(safety_config.path, "safety configuration")
+    safety = safety_config.value
     if safety.get("schema_version") != 1 or safety.get("mode") != "zero-write":
         raise ManifestError("safety configuration must enforce zero-write")
 
     budget_artifact = _verified_artifact(
         manifest_path, manifest.get("budget_artifact"), "budget artifact"
     )
-    _validate_budget(_read_object(budget_artifact.path, "budget artifact"))
+    _validate_budget(budget_artifact.value)
 
     recorder = manifest.get("recorder", {})
     if not isinstance(recorder, dict):
@@ -245,7 +254,8 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
 
     return ValidatedManifest(
         path=manifest_path,
-        sha256=_sha256_file(manifest_path),
+        sha256=hashlib.sha256(manifest_content).hexdigest(),
+        content=manifest_content,
         run_id=run_id,
         invocation_id=invocation_id,
         output_root=_artifact_path(
@@ -423,7 +433,7 @@ def _publish_failure(
     manifest: ValidatedManifest,
     paths: RunPaths,
     progress: RunProgress,
-    error: Exception,
+    error: BaseException,
 ) -> NoReturn:
     reason = str(error) or type(error).__name__
     _append_stage(paths.lifecycle, "terminal_report_prepared", outcome="failed")
@@ -463,19 +473,11 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
     manifest.output_root.mkdir(parents=True, exist_ok=True)
     claim.parent.mkdir(parents=True, exist_ok=True)
     try:
-        claim.mkdir()
-    except FileExistsError as error:
-        raise ManifestError(
-            f"invocation identity was already used: {manifest.invocation_id}"
-        ) from error
-    (claim / "run-id.txt").write_text(manifest.run_id + "\n", encoding="utf-8")
-    try:
         partial.mkdir()
     except FileExistsError as error:
         raise ManifestError(f"run output already exists: {manifest.run_id}") from error
 
     artifacts = partial / "artifacts"
-    artifacts.mkdir()
     paths = RunPaths(
         final=final,
         partial=partial,
@@ -490,13 +492,32 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         adapter_audit=artifacts / "adapter-audit.jsonl",
         recorder_transcript=artifacts / "recorder-stdout.jsonl",
     )
-    paths.manifest_copy.write_bytes(manifest.path.read_bytes())
-    paths.candidate_copy.write_bytes(manifest.candidate_package.path.read_bytes())
-    paths.safety_copy.write_bytes(manifest.safety_config.path.read_bytes())
-    paths.budget_copy.write_bytes(manifest.budget_artifact.path.read_bytes())
-    _append_stage(paths.lifecycle, "manifest_validated")
-    _append_stage(paths.lifecycle, "invocation_authority_acquired")
-    return paths
+    claim_created = False
+    try:
+        artifacts.mkdir()
+        paths.manifest_copy.write_bytes(manifest.content)
+        paths.candidate_copy.write_bytes(manifest.candidate_package.content)
+        paths.safety_copy.write_bytes(manifest.safety_config.content)
+        paths.budget_copy.write_bytes(manifest.budget_artifact.content)
+        _append_stage(paths.lifecycle, "manifest_validated")
+        try:
+            claim.mkdir()
+        except FileExistsError as error:
+            raise ManifestError(
+                f"invocation identity was already used: {manifest.invocation_id}"
+            ) from error
+        claim_created = True
+        (claim / "run-id.txt").write_text(manifest.run_id + "\n", encoding="utf-8")
+        _append_stage(paths.lifecycle, "invocation_authority_acquired")
+        return paths
+    except BaseException:
+        if claim_created:
+            run_id_path = claim / "run-id.txt"
+            if run_id_path.exists():
+                run_id_path.unlink()
+            claim.rmdir()
+        shutil.rmtree(partial)
+        raise
 
 
 def _start_recorder(
@@ -528,13 +549,26 @@ def _start_recorder(
     )
 
 
+def _interrupt_invocation(signum: int, frame: Any) -> NoReturn:
+    del frame
+    signal_name = signal.Signals(signum).name
+    raise InvocationInterrupted(f"invocation interrupted by {signal_name}")
+
+
 def run(manifest_path: Path) -> dict[str, Any]:
     manifest = _validate_manifest(manifest_path)
-    paths = _accept_run(manifest)
-    progress = RunProgress()
-    deadline = time.monotonic() + manifest.maximum_duration_s
+    paths: RunPaths | None = None
+    progress: RunProgress | None = None
     recorder: subprocess.Popen[str] | None = None
+    previous_signal_handlers = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    for signum in previous_signal_handlers:
+        signal.signal(signum, _interrupt_invocation)
     try:
+        paths = _accept_run(manifest)
+        progress = RunProgress()
+        deadline = time.monotonic() + manifest.maximum_duration_s
         readiness = _run_adapter(
             "readiness",
             [
@@ -639,7 +673,31 @@ def run(manifest_path: Path) -> dict[str, Any]:
         if reset.get("requested") is not False:
             raise RuntimeError("zero-write reset adapter requested a reset")
         _complete_stage(paths, progress, "reset_disposition_recorded")
-    except Exception as error:  # noqa: BLE001 - every accepted run must terminate
+
+        _append_stage(paths.lifecycle, "terminal_report_prepared")
+        report = _terminal_report(
+            manifest,
+            paths,
+            completed_stage="terminal_report",
+            terminal_reason="zero_write_invocation_completed",
+            task_result=str(task_result),
+        )
+        _write_json(paths.partial / "terminal-report.json", report)
+        result = {
+            "result": "zero_write_invocation_completed",
+            "run_id": manifest.run_id,
+            "invocation_id": manifest.invocation_id,
+            "output_directory": str(paths.final),
+            "command_publishers_created": 0,
+            "writes": 0,
+        }
+        for signum in previous_signal_handlers:
+            signal.signal(signum, signal.SIG_IGN)
+        os.replace(paths.partial, paths.final)
+        return result
+    except BaseException as error:
+        if paths is None or progress is None:
+            raise
         if recorder is not None and recorder.poll() is None:
             recorder.kill()
             recorder.wait()
@@ -648,25 +706,8 @@ def run(manifest_path: Path) -> dict[str, Any]:
         if recorder is not None and recorder.poll() is None:
             recorder.kill()
             recorder.wait()
-
-    _append_stage(paths.lifecycle, "terminal_report_prepared")
-    report = _terminal_report(
-        manifest,
-        paths,
-        completed_stage="terminal_report",
-        terminal_reason="zero_write_invocation_completed",
-        task_result=str(task_result),
-    )
-    _write_json(paths.partial / "terminal-report.json", report)
-    os.replace(paths.partial, paths.final)
-    return {
-        "result": "zero_write_invocation_completed",
-        "run_id": manifest.run_id,
-        "invocation_id": manifest.invocation_id,
-        "output_directory": str(paths.final),
-        "command_publishers_created": 0,
-        "writes": 0,
-    }
+        for signum, handler in previous_signal_handlers.items():
+            signal.signal(signum, handler)
 
 
 def main() -> int:
