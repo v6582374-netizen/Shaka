@@ -26,17 +26,33 @@ manifest validation
 
 Only `zero-write` is accepted. The readiness, candidate, release and reset
 adapters are deterministic and offline; none creates a command publisher or
-performs a robot write. Candidate replay executes the package's digest-bound
-Python preprocessing and inference callables against a digest-bound saved
-observation, checks the proposed action without publishing it, and emits a
-controller trace rather than a task result. The independent evaluation adapter
-is the only source of `task_result` and may call the configured OpenAI or Codex
-model provider. After control release and recorder completion, the runner
+performs a robot write. Candidate preprocessing and inference execute in two
+fresh `bubblewrap-zero-write-v1` sandboxes. Each exposes only a read-only
+interpreter/runtime, worker, and candidate replay bundle; host `/tmp`, `/run`,
+home directories, evaluator artifacts, network, IPC, process namespace,
+capabilities, and host devices are unavailable. The trusted adapter recomputes
+the preprocessed-input and output digests from each sandbox payload and exposes
+no command-publisher or action-write capability; its zero counts are
+authoritative. A nested supervisor keeps the runner's public result channel and
+private result pipe out of the candidate process; only the supervisor emits the
+stage result consumed by the adapter. Candidate-reported counts remain
+diagnostics and a nonzero declaration rejects admission. Candidate entrypoint
+modules contain only non-executing definitions, so import-time code cannot
+impersonate a replay stage. Candidate replay checks the proposed action without
+publishing it and emits a controller trace rather than a task result. The host must provide
+`bwrap`; its absence rejects the manifest before invocation authority or the
+recorder starts. The independent evaluation adapter is the only source of
+`task_result` and may call the configured OpenAI or Codex model provider. After
+control release and recorder completion, the runner
 verifies the invocation identity and every entry in `sha256.txt`, delegates
 stream-coverage adjudication to the existing episode finalizer, and only then
 calls the existing four-view evidence preparation and multimodal evaluator.
 Controller `aborted`/`abstained` facts and incomplete capture retain priority
 over optimistic visual output.
+
+Evaluator configuration and its adjacent frozen prompt must not be placed in a
+candidate-visible interpreter or system-library runtime path; the runner rejects
+such manifests before recorder startup.
 
 ## Run manifest v2
 
@@ -142,12 +158,35 @@ input, and `infer(model_input, configuration)` returns one proposed command:
 }
 ```
 
+The digest-bound safety configuration provides the trusted control-entry
+contract independently of the candidate:
+
+```json
+{
+  "schema_version": 1,
+  "mode": "zero-write",
+  "control_contract": {
+    "action_definition_id": "g1-arm-position-v001",
+    "command_type": "joint_position",
+    "joint_names": ["..."],
+    "value_dimension": 1,
+    "maximum_output_age_ns": 100000000
+  }
+}
+```
+
+Candidate action definitions must match every control field in this contract,
+and both runtime entrypoints must be top-level two-argument functions with no
+import-time code before the lifecycle begins.
+
 The action definition freezes the command type, joint names and order, value
 dimension, and maximum allowed output age. Admission rejects incompatible
-action definitions, wrong dimensions, non-finite values, stale timestamps,
-wrong joint order, nonzero publisher counts, and nonzero writes. Any candidate
-success claim is retained only under `ignored_candidate_claims`; it never enters
-the task-result field.
+action definitions, wrong dimensions, non-finite values, stale or future
+timestamps, wrong joint order, nonzero publisher declarations, and nonzero write
+declarations. Preprocessed values use canonical JSON when possible and a binary
+evidence fallback otherwise; non-JSON candidate outputs are rejected with their
+evidence digest retained. Any candidate success claim is retained only under
+`ignored_candidate_claims`; it never enters the task-result field.
 
 The versioned budget artifact binds the zero-write limits and frozen contracts:
 

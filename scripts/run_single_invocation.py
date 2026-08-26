@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 RECORDER = Path(__file__).with_name("record_evaluator_episode.py")
 ADAPTER = Path(__file__).with_name("_offline_invocation_adapter.py")
+SANDBOX = shutil.which("bwrap")
 TASK_RESULTS = frozenset(
     {"succeeded", "failed", "indeterminate", "aborted", "abstained"}
 )
@@ -205,7 +207,106 @@ def _verified_file(
     return VerifiedFile(path, actual_digest, content)
 
 
-def _candidate_artifacts(package: VerifiedArtifact) -> dict[str, VerifiedFile]:
+def _validate_python_callable(
+    artifact: VerifiedFile, callable_name: str, stage: str
+) -> None:
+    try:
+        module = ast.parse(artifact.content.decode("utf-8"), filename=str(artifact.path))
+    except (UnicodeDecodeError, SyntaxError) as error:
+        raise ManifestError(
+            f"candidate runtime {stage} artifact is not valid Python"
+        ) from error
+    functions: dict[str, ast.FunctionDef] = {}
+    for node in module.body:
+        if isinstance(node, ast.FunctionDef):
+            if (
+                node.decorator_list
+                or node.args.defaults
+                or node.args.kw_defaults
+                or node.returns is not None
+                or any(
+                    argument.annotation is not None
+                    for argument in [
+                        *node.args.posonlyargs,
+                        *node.args.args,
+                        *node.args.kwonlyargs,
+                    ]
+                )
+            ):
+                raise ManifestError(
+                    "candidate runtime artifacts must not execute code during import"
+                )
+            functions[node.name] = node
+        elif (
+            (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant))
+            or (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "__future__"
+                and all(alias.name == "annotations" for alias in node.names)
+            )
+            or isinstance(node, ast.Pass)
+        ):
+            continue
+        else:
+            raise ManifestError(
+                "candidate runtime artifacts must not execute code during import"
+            )
+    function = functions.get(callable_name)
+    if function is None:
+        raise ManifestError(
+            f"candidate runtime {stage} callable is absent: {callable_name}"
+        )
+    if (
+        len([*function.args.posonlyargs, *function.args.args]) != 2
+        or function.args.vararg
+        or function.args.kwarg
+    ):
+        raise ManifestError(
+            f"candidate runtime {stage} callable must accept exactly two positional arguments"
+        )
+
+
+def _validated_action_definition(
+    value: dict[str, Any], description: str
+) -> dict[str, Any]:
+    if value.get("schema_version") != 1:
+        raise ManifestError(f"{description} schema_version must be 1")
+    action_id = value.get("action_definition_id")
+    command_type = value.get("command_type")
+    joint_names = value.get("joint_names")
+    dimension = value.get("value_dimension")
+    maximum_age = value.get("maximum_output_age_ns")
+    if not isinstance(action_id, str) or not action_id:
+        raise ManifestError(f"{description} id must be non-empty")
+    if not isinstance(command_type, str) or not command_type:
+        raise ManifestError(f"{description} command_type must be non-empty")
+    if (
+        not isinstance(joint_names, list)
+        or not joint_names
+        or any(not isinstance(name, str) or not name for name in joint_names)
+        or len(set(joint_names)) != len(joint_names)
+    ):
+        raise ManifestError(f"{description} joint_names must be unique")
+    if (
+        not isinstance(dimension, int)
+        or isinstance(dimension, bool)
+        or dimension != len(joint_names)
+    ):
+        raise ManifestError(f"{description} dimension must match joints")
+    if not isinstance(maximum_age, int) or isinstance(maximum_age, bool) or maximum_age < 0:
+        raise ManifestError(f"{description} maximum_output_age_ns must not be negative")
+    return {
+        "action_definition_id": action_id,
+        "command_type": command_type,
+        "joint_names": joint_names,
+        "value_dimension": dimension,
+        "maximum_output_age_ns": maximum_age,
+    }
+
+
+def _candidate_artifacts(
+    package: VerifiedArtifact, trusted_action: dict[str, Any]
+) -> dict[str, VerifiedFile]:
     if "task_result" in package.value:
         raise ManifestError("candidate package must not contain a task result")
     source_version = package.value.get("source_version")
@@ -249,27 +350,16 @@ def _candidate_artifacts(package: VerifiedArtifact) -> dict[str, VerifiedFile]:
             raise ManifestError(
                 f"candidate runtime {stage} callable must be a Python identifier"
             )
+        _validate_python_callable(artifacts[artifact_name], callable_name, stage)
 
     action = _read_verified_object(artifacts["action_definition"], "action definition")
-    if action.get("schema_version") != 1:
-        raise ManifestError("candidate action definition schema_version must be 1")
-    action_id = action.get("action_definition_id")
-    joint_names = action.get("joint_names")
-    dimension = action.get("value_dimension")
-    maximum_age = action.get("maximum_output_age_ns")
-    if not isinstance(action_id, str) or not action_id:
-        raise ManifestError("candidate action definition id must be non-empty")
-    if (
-        not isinstance(joint_names, list)
-        or not joint_names
-        or any(not isinstance(name, str) or not name for name in joint_names)
-        or len(set(joint_names)) != len(joint_names)
-    ):
-        raise ManifestError("candidate action definition joint_names must be unique")
-    if dimension != len(joint_names):
-        raise ManifestError("candidate action definition dimension must match joints")
-    if not isinstance(maximum_age, int) or maximum_age < 0:
-        raise ManifestError("candidate maximum_output_age_ns must not be negative")
+    candidate_action = _validated_action_definition(
+        action, "candidate action definition"
+    )
+    if candidate_action != trusted_action:
+        raise ManifestError(
+            "candidate action definition does not match the trusted control contract"
+        )
     _read_verified_object(artifacts["configuration"], "candidate configuration")
     return artifacts
 
@@ -303,6 +393,24 @@ def _verified_plain_file(
     return content
 
 
+def _candidate_visible_runtime_paths() -> tuple[Path, ...]:
+    paths = [Path(sys.prefix).resolve()]
+    for path in (Path("/lib"), Path("/lib64"), Path("/usr/lib")):
+        if path.exists():
+            paths.append(path.resolve())
+    return tuple(paths)
+
+
+def _reject_candidate_visible_path(path: Path, description: str) -> None:
+    if any(
+        path.is_relative_to(runtime_path)
+        for runtime_path in _candidate_visible_runtime_paths()
+    ):
+        raise ManifestError(
+            f"{description} must not be reachable from the candidate runtime"
+        )
+
+
 def _validate_budget(value: dict[str, Any]) -> None:
     if value.get("schema_version") != 1:
         raise ManifestError("budget artifact schema_version must be 1")
@@ -329,6 +437,8 @@ def _validate_budget(value: dict[str, Any]) -> None:
 
 def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     manifest_path = manifest_path.resolve()
+    if SANDBOX is None:
+        raise ManifestError("bubblewrap is required for zero-write candidate replay")
     manifest, manifest_content = _read_object(manifest_path, "run manifest")
     if manifest.get("schema_version") != 2:
         raise ManifestError("run manifest schema_version must be 2")
@@ -370,7 +480,19 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         raise ManifestError(
             "candidate package identity does not match the run manifest"
         )
-    candidate_artifacts = _candidate_artifacts(candidate_package)
+    safety_config = _verified_artifact(
+        manifest_path, manifest.get("safety_config"), "safety configuration"
+    )
+    safety = safety_config.value
+    if safety.get("schema_version") != 1 or safety.get("mode") != "zero-write":
+        raise ManifestError("safety configuration must enforce zero-write")
+    trusted_action_value = safety.get("control_contract")
+    if not isinstance(trusted_action_value, dict):
+        raise ManifestError("safety configuration must bind a control contract")
+    trusted_action = _validated_action_definition(
+        {"schema_version": 1, **trusted_action_value}, "trusted control contract"
+    )
+    candidate_artifacts = _candidate_artifacts(candidate_package, trusted_action)
     candidate_observation = _verified_artifact(
         manifest_path, candidate.get("observation"), "candidate observation"
     )
@@ -380,13 +502,6 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     captured_at_ns = observation.get("captured_at_ns")
     if not isinstance(captured_at_ns, int) or captured_at_ns < 0:
         raise ManifestError("candidate observation captured_at_ns must not be negative")
-
-    safety_config = _verified_artifact(
-        manifest_path, manifest.get("safety_config"), "safety configuration"
-    )
-    safety = safety_config.value
-    if safety.get("schema_version") != 1 or safety.get("mode") != "zero-write":
-        raise ManifestError("safety configuration must enforce zero-write")
 
     budget_artifact = _verified_artifact(
         manifest_path, manifest.get("budget_artifact"), "budget artifact"
@@ -404,6 +519,9 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         },
         "evaluator configuration",
     )
+    _reject_candidate_visible_path(
+        evaluator_config.path, "evaluator configuration"
+    )
     evaluator_version = _required_string(manifest, "evaluator_version")
     if evaluator_config.value.get("schema_version") != 1:
         raise ManifestError("evaluator configuration schema_version must be 1")
@@ -417,6 +535,7 @@ def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
         evaluator.get("prompt_sha256"),
         "frozen evaluator prompt",
     )
+    _reject_candidate_visible_path(evaluator_prompt_path, "frozen evaluator prompt")
 
     recorder = manifest.get("recorder", {})
     if not isinstance(recorder, dict):
@@ -584,10 +703,11 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
         if path.is_file()
     }
     if paths.candidate_bundle.is_dir():
-        for path in sorted(paths.candidate_bundle.iterdir()):
-            if path.is_file():
-                artifacts[f"candidate_artifact_{path.stem}"] = _artifact(
-                    path, paths.partial
+        for directory in sorted(paths.candidate_bundle.iterdir()):
+            files = list(directory.iterdir()) if directory.is_dir() else []
+            if len(files) == 1 and files[0].is_file():
+                artifacts[f"candidate_artifact_{directory.name}"] = _artifact(
+                    files[0], paths.partial
                 )
     evidence = paths.evidence_root / paths.claim.name
     evidence_manifest = evidence / "sha256.txt"
@@ -768,7 +888,9 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         paths.candidate_bundle.mkdir()
         runtime_artifacts: dict[str, dict[str, str]] = {}
         for name, artifact in manifest.candidate_artifacts.items():
-            destination = paths.candidate_bundle / f"{name}{artifact.path.suffix}"
+            artifact_directory = paths.candidate_bundle / name
+            artifact_directory.mkdir()
+            destination = artifact_directory / artifact.path.name
             destination.write_bytes(artifact.content)
             runtime_artifacts[name] = {
                 "path": str(destination.relative_to(paths.artifacts)),
@@ -904,6 +1026,10 @@ def run(manifest_path: Path) -> dict[str, Any]:
                         str(paths.candidate_observation),
                         "--controller-trace",
                         str(paths.controller_trace),
+                        "--control-contract",
+                        str(paths.safety_copy),
+                        "--timeout-s",
+                        str(max(0.01, _remaining(deadline) - 0.25)),
                     ],
                     paths.artifacts / "candidate-result.json",
                     paths,

@@ -154,7 +154,21 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         )
         safety_config = root / "safety.json"
         safety_config.write_text(
-            json.dumps({"schema_version": 1, "mode": "zero-write"}) + "\n",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "mode": "zero-write",
+                    "control_contract": {
+                        "action_definition_id": "g1-right-arm-position-v001",
+                        "command_type": "joint_position",
+                        "joint_names": joint_names,
+                        "value_dimension": len(joint_names),
+                        "maximum_output_age_ns": 100_000_000,
+                    },
+                },
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
         budget_artifact = root / "budget.json"
@@ -301,13 +315,18 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         )
 
     def replace_candidate_implementation(self, manifest: Path, source: str) -> None:
+        self.replace_candidate_artifact(manifest, "implementation", source)
+
+    def replace_candidate_artifact(
+        self, manifest: Path, artifact_name: str, source: str
+    ) -> None:
         manifest_content = json.loads(manifest.read_text())
         package_path = Path(manifest_content["candidate"]["package_path"])
         package = json.loads(package_path.read_text())
-        reference = package["artifacts"]["implementation"]
-        implementation = package_path.parent / reference["path"]
-        implementation.write_text(source, encoding="utf-8")
-        reference["sha256"] = sha256_file(implementation)
+        reference = package["artifacts"][artifact_name]
+        artifact = package_path.parent / reference["path"]
+        artifact.write_text(source, encoding="utf-8")
+        reference["sha256"] = sha256_file(artifact)
         package_path.write_text(
             json.dumps(package, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -323,8 +342,8 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         manifest: Path,
         reason: str,
         *,
-        publishers: int = 0,
-        writes: int = 0,
+        reported_publishers: int | None = None,
+        reported_writes: int | None = None,
     ) -> None:
         completed = self.run_cli(root, manifest)
 
@@ -334,16 +353,16 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         self.assertEqual(result["failure_class"], "deployment_defect")
         self.assertEqual(result["physical_rollout_attempts_consumed"], 0)
         self.assertEqual(result["robot_runtime_consumed_s"], 0)
-        self.assertEqual(result["command_publishers_created"], publishers)
-        self.assertEqual(result["writes"], writes)
+        self.assertEqual(result["command_publishers_created"], 0)
+        self.assertEqual(result["writes"], 0)
         run_directory = root / "runs" / "RUN-001"
         report = json.loads((run_directory / "terminal-report.json").read_text())
         self.assertNotIn("task_result", report)
         self.assertEqual(report["failure_class"], "deployment_defect")
         self.assertEqual(report["physical_rollout_attempts_consumed"], 0)
         self.assertEqual(report["robot_runtime_consumed_s"], 0)
-        self.assertEqual(report["command_publishers_created"], publishers)
-        self.assertEqual(report["writes"], writes)
+        self.assertEqual(report["command_publishers_created"], 0)
+        self.assertEqual(report["writes"], 0)
         candidate_result = json.loads(
             (run_directory / "artifacts" / "candidate-result.json").read_text()
         )
@@ -351,8 +370,18 @@ class SingleInvocationRunnerTest(unittest.TestCase):
         self.assertEqual(candidate_result["failure_class"], "deployment_defect")
         self.assertIn(reason, candidate_result["reason"])
         self.assertEqual(len(candidate_result["candidate_output_sha256"]), 64)
-        self.assertEqual(candidate_result["command_publishers_created"], publishers)
-        self.assertEqual(candidate_result["writes"], writes)
+        self.assertEqual(candidate_result["command_publishers_created"], 0)
+        self.assertEqual(candidate_result["writes"], 0)
+        if reported_publishers is not None:
+            self.assertEqual(
+                candidate_result["diagnostics"]["candidate_reported_command_publishers_created"],
+                reported_publishers,
+            )
+        if reported_writes is not None:
+            self.assertEqual(
+                candidate_result["diagnostics"]["candidate_reported_writes"],
+                reported_writes,
+            )
 
     def test_runs_one_complete_zero_write_invocation_through_the_public_cli(
         self,
@@ -431,9 +460,14 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                 candidate_result["diagnostics"],
                 {
                     "action_definition_id": "g1-right-arm-position-v001",
+                    "candidate_output_encoding": "canonical-json",
+                    "candidate_reported_command_publishers_created": 0,
+                    "candidate_reported_writes": 0,
                     "inference": "completed",
                     "output_validation": "compatible",
+                    "preprocessed_input_encoding": "canonical-json",
                     "preprocessing": "completed",
+                    "sandbox_policy": "bubblewrap-zero-write-v1",
                 },
             )
             self.assertEqual(
@@ -711,6 +745,118 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             self.assertFalse((root / "recorder-audit.jsonl").exists())
             self.assertFalse((root / "runs").exists())
 
+    def test_rejects_a_missing_runtime_callable_before_starting_the_recorder(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            content = json.loads(manifest.read_text())
+            package_path = Path(content["candidate"]["package_path"])
+            package = json.loads(package_path.read_text())
+            package["runtime"]["inference"]["callable"] = "missing_infer"
+            package_path.write_text(
+                json.dumps(package, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            content["candidate"]["package_sha256"] = sha256_file(package_path)
+            manifest.write_text(json.dumps(content), encoding="utf-8")
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("inference callable is absent", json.loads(completed.stdout)["reason"])
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_rejects_a_candidate_action_contract_mismatch_before_recording(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            content = json.loads(manifest.read_text())
+            package_path = Path(content["candidate"]["package_path"])
+            package = json.loads(package_path.read_text())
+            reference = package["artifacts"]["action_definition"]
+            definition_path = package_path.parent / reference["path"]
+            definition = json.loads(definition_path.read_text())
+            definition["command_type"] = "incompatible-command"
+            definition_path.write_text(
+                json.dumps(definition, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            reference["sha256"] = sha256_file(definition_path)
+            package_path.write_text(
+                json.dumps(package, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            content["candidate"]["package_sha256"] = sha256_file(package_path)
+            manifest.write_text(json.dumps(content), encoding="utf-8")
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "does not match the trusted control contract",
+                json.loads(completed.stdout)["reason"],
+            )
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_rejects_import_time_candidate_code_before_starting_the_recorder(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                '''raise RuntimeError("must not run during candidate validation")
+
+def infer(model_input, configuration):
+    return {}
+''',
+            )
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "must not execute code during import", json.loads(completed.stdout)["reason"]
+            )
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_rejects_non_integral_action_dimensions_before_recording(self) -> None:
+        for dimension in (True, 3.0):
+            with self.subTest(dimension=dimension), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                manifest = self.write_fixture(root)
+                content = json.loads(manifest.read_text())
+                package_path = Path(content["candidate"]["package_path"])
+                package = json.loads(package_path.read_text())
+                reference = package["artifacts"]["action_definition"]
+                definition_path = package_path.parent / reference["path"]
+                definition = json.loads(definition_path.read_text())
+                definition["value_dimension"] = dimension
+                definition_path.write_text(
+                    json.dumps(definition, sort_keys=True) + "\n", encoding="utf-8"
+                )
+                reference["sha256"] = sha256_file(definition_path)
+                package_path.write_text(
+                    json.dumps(package, sort_keys=True) + "\n", encoding="utf-8"
+                )
+                content["candidate"]["package_sha256"] = sha256_file(package_path)
+                manifest.write_text(json.dumps(content), encoding="utf-8")
+
+                completed = self.run_cli(root, manifest)
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn(
+                    "candidate action definition dimension must match joints",
+                    json.loads(completed.stdout)["reason"],
+                )
+                self.assertFalse((root / "recorder-audit.jsonl").exists())
+                self.assertFalse((root / "runs").exists())
+
     def test_dimension_error_is_a_zero_budget_deployment_defect(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -749,7 +895,7 @@ class SingleInvocationRunnerTest(unittest.TestCase):
 """,
             )
 
-            self.assert_candidate_deployment_defect(root, manifest, "finite")
+            self.assert_candidate_deployment_defect(root, manifest, "JSON-serializable")
 
     def test_stale_timestamp_is_a_zero_budget_deployment_defect(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -770,6 +916,280 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             )
 
             self.assert_candidate_deployment_defect(root, manifest, "stale")
+
+    def test_future_timestamp_is_a_zero_budget_deployment_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"] + 1,
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "in the future")
+
+    def test_admits_a_non_json_preprocessed_input_with_binary_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_artifact(
+                manifest,
+                "input_preprocessor",
+                """def preprocess(observation, configuration):
+    return {
+        "observation_time_ns": observation["captured_at_ns"],
+        "scale": configuration["scale"],
+        "opaque": {"candidate", "input"},
+    }
+""",
+            )
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(
+                (root / "runs" / "RUN-001" / "artifacts" / "candidate-result.json").read_text()
+            )
+            self.assertEqual(
+                result["diagnostics"]["preprocessed_input_encoding"], "pickle-v5"
+            )
+            self.assertEqual(len(result["preprocessed_input_sha256"]), 64)
+
+    def test_non_json_output_is_a_zero_budget_deployment_defect_with_evidence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+        "debug": {"not", "json"},
+    }
+""",
+            )
+
+            self.assert_candidate_deployment_defect(root, manifest, "JSON-serializable")
+            candidate_result = json.loads(
+                (root / "runs" / "RUN-001" / "artifacts" / "candidate-result.json").read_text()
+            )
+            self.assertEqual(
+                candidate_result["diagnostics"]["candidate_output_encoding"],
+                "pickle-v5",
+            )
+
+    def test_sandbox_blocks_a_host_write_when_candidate_omits_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            target = root / "host-write-target.txt"
+            target.write_text("unchanged\n", encoding="utf-8")
+            content = json.loads(manifest.read_text())
+            package_path = Path(content["candidate"]["package_path"])
+            package = json.loads(package_path.read_text())
+            configuration_reference = package["artifacts"]["configuration"]
+            configuration_path = package_path.parent / configuration_reference["path"]
+            configuration = json.loads(configuration_path.read_text())
+            configuration["host_write_target"] = str(target)
+            configuration_path.write_text(
+                json.dumps(configuration, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            configuration_reference["sha256"] = sha256_file(configuration_path)
+            package_path.write_text(
+                json.dumps(package, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            content["candidate"]["package_sha256"] = sha256_file(package_path)
+            manifest.write_text(json.dumps(content), encoding="utf-8")
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    from pathlib import Path
+    try:
+        Path(configuration["host_write_target"]).write_text("modified\\n", encoding="utf-8")
+    except OSError:
+        pass
+    return {
+        "action_definition_id": configuration["action_definition_id"],
+        "timestamp_ns": model_input["observation_time_ns"],
+        "joint_names": configuration["joint_names"],
+        "values": [0.1, 0.2, 0.3],
+    }
+""",
+            )
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(target.read_text(encoding="utf-8"), "unchanged\n")
+            candidate_result = json.loads(
+                (root / "runs" / "RUN-001" / "artifacts" / "candidate-result.json").read_text()
+            )
+            self.assertEqual(candidate_result["command_publishers_created"], 0)
+            self.assertEqual(candidate_result["writes"], 0)
+            self.assertEqual(
+                candidate_result["diagnostics"]["candidate_reported_command_publishers_created"],
+                0,
+            )
+            self.assertEqual(candidate_result["diagnostics"]["candidate_reported_writes"], 0)
+
+    def test_sandbox_hides_an_evaluator_outside_the_candidate_replay_bundle(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            tempfile.TemporaryDirectory(dir="/var/tmp") as evaluator_temporary,
+        ):
+            root = Path(temporary)
+            evaluator_root = Path(evaluator_temporary)
+            manifest = self.write_fixture(root)
+            manifest_content = json.loads(manifest.read_text())
+            original_evaluator = Path(manifest_content["evaluator"]["config_path"])
+            external_evaluator = evaluator_root / "evaluator.json"
+            external_prompt = evaluator_root / "prompt.md"
+            external_evaluator.write_bytes(original_evaluator.read_bytes())
+            external_prompt.write_bytes(original_evaluator.with_name("prompt.md").read_bytes())
+            manifest_content["evaluator"]["config_path"] = str(external_evaluator)
+            manifest_content["evaluator"]["config_sha256"] = sha256_file(
+                external_evaluator
+            )
+            manifest_content["evaluator"]["prompt_sha256"] = sha256_file(
+                external_prompt
+            )
+            manifest.write_text(json.dumps(manifest_content), encoding="utf-8")
+            secret = evaluator_root / "evaluator-secret.txt"
+            secret.write_text("EVALUATOR-SECRET-EXFILTRATED", encoding="utf-8")
+            self.replace_candidate_artifact(
+                manifest,
+                "configuration",
+                json.dumps(
+                    {
+                        "action_definition_id": "g1-right-arm-position-v001",
+                        "joint_names": [
+                            "right_shoulder_pitch_joint",
+                            "right_elbow_joint",
+                            "right_wrist_pitch_joint",
+                        ],
+                        "scale": 0.5,
+                        "value": 0.2,
+                        "evaluator_secret_path": str(secret),
+                    },
+                    sort_keys=True,
+                ),
+            )
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    from pathlib import Path
+    raise RuntimeError(Path(configuration["evaluator_secret_path"]).read_text())
+""",
+            )
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            candidate_result = json.loads(
+                (root / "runs" / "RUN-001" / "artifacts" / "candidate-result.json").read_text()
+            )
+            self.assertNotIn("EVALUATOR-SECRET-EXFILTRATED", candidate_result["reason"])
+            self.assertEqual(secret.read_text(encoding="utf-8"), "EVALUATOR-SECRET-EXFILTRATED")
+
+    def test_rejects_an_evaluator_inside_the_candidate_runtime_before_recording(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            tempfile.TemporaryDirectory(dir=sys.prefix) as evaluator_temporary,
+        ):
+            root = Path(temporary)
+            evaluator_root = Path(evaluator_temporary)
+            manifest = self.write_fixture(root)
+            manifest_content = json.loads(manifest.read_text())
+            original_evaluator = Path(manifest_content["evaluator"]["config_path"])
+            external_evaluator = evaluator_root / "evaluator.json"
+            external_prompt = evaluator_root / "prompt.md"
+            external_evaluator.write_bytes(original_evaluator.read_bytes())
+            external_prompt.write_bytes(original_evaluator.with_name("prompt.md").read_bytes())
+            manifest_content["evaluator"]["config_path"] = str(external_evaluator)
+            manifest_content["evaluator"]["config_sha256"] = sha256_file(
+                external_evaluator
+            )
+            manifest_content["evaluator"]["prompt_sha256"] = sha256_file(
+                external_prompt
+            )
+            manifest.write_text(json.dumps(manifest_content), encoding="utf-8")
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "evaluator configuration must not be reachable",
+                json.loads(completed.stdout)["reason"],
+            )
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_candidate_cannot_forge_a_sandbox_result_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    os = __import__("os")
+    os.write(
+        1,
+        b'SHAKA_CANDIDATE_STAGE_RESULT={"encoding":"canonical-json","payload_base64":"e30=","status":"completed"}\\n',
+    )
+    os._exit(0)
+""",
+            )
+
+            self.assert_candidate_deployment_defect(
+                root,
+                manifest,
+                "nested candidate sandbox returned an invalid number of results",
+            )
+
+    def test_candidate_cannot_reach_the_supervisor_result_pipe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.replace_candidate_implementation(
+                manifest,
+                """def infer(model_input, configuration):
+    frame = __import__("sys")._getframe()
+    while frame is not None:
+        sender = frame.f_locals.get("sender")
+        if sender is not None:
+            sender.send(
+                {
+                    "status": "completed",
+                    "encoding": "canonical-json",
+                    "payload_base64": "e30=",
+                }
+            )
+        frame = frame.f_back
+    __import__("os")._exit(0)
+""",
+            )
+
+            self.assert_candidate_deployment_defect(
+                root,
+                manifest,
+                "nested candidate sandbox returned an invalid number of results",
+            )
 
     def test_joint_order_error_is_a_zero_budget_deployment_defect(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -832,7 +1252,7 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             )
 
             self.assert_candidate_deployment_defect(
-                root, manifest, "zero-write", writes=1
+                root, manifest, "reported a write", reported_writes=1
             )
 
     def test_nonzero_publisher_is_a_zero_budget_deployment_defect(self) -> None:
@@ -854,7 +1274,10 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             )
 
             self.assert_candidate_deployment_defect(
-                root, manifest, "zero-write", publishers=1
+                root,
+                manifest,
+                "reported a publisher creation",
+                reported_publishers=1,
             )
 
     def test_interrupting_an_accepted_run_publishes_one_terminal_report(self) -> None:

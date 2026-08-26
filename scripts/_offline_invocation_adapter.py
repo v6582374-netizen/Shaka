@@ -4,18 +4,25 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
-import importlib.util
 import json
 import math
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from artifact_identity import sha256_file as _sha256_file
 from invocation_evaluation import evaluate_finalized_invocation
+
+SANDBOX_POLICY = "bubblewrap-zero-write-v1"
+WORKER = Path(__file__).with_name("_candidate_sandbox_worker.py")
+WORKER_MARKER = "SHAKA_CANDIDATE_STAGE_RESULT="
 
 
 def _sha256_json(value: Any) -> str:
@@ -95,34 +102,6 @@ def _verified_path(
     return path
 
 
-def _load_callable(path: Path, name: str, stage: str) -> Callable[..., Any]:
-    module_name = f"shaka_candidate_{stage}_{_sha256_file(path)}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"candidate {stage} artifact cannot be loaded")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    function = getattr(module, name, None)
-    if not callable(function):
-        raise TypeError(f"candidate {stage} callable is absent: {name}")
-    return function
-
-
-def _entrypoint(
-    runtime: dict[str, Any], artifacts: dict[str, Path], stage: str
-) -> Callable[..., Any]:
-    value = runtime.get(stage)
-    if not isinstance(value, dict):
-        raise TypeError(f"candidate runtime {stage} must be an object")
-    artifact_name = value.get("artifact")
-    callable_name = value.get("callable")
-    if artifact_name not in artifacts:
-        raise ValueError(f"candidate runtime {stage} references an unknown artifact")
-    if not isinstance(callable_name, str) or not callable_name.isidentifier():
-        raise ValueError(f"candidate runtime {stage} callable is invalid")
-    return _load_callable(artifacts[artifact_name], callable_name, stage)
-
-
 def _adapter_plan(adapter: str) -> dict[str, Any]:
     raw_plan = os.environ.get("SHAKA_OFFLINE_ADAPTER_PLAN")
     if raw_plan is None:
@@ -161,6 +140,141 @@ def readiness(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _sandbox_prefix_mounts() -> list[str]:
+    prefix = Path(sys.prefix).resolve()
+    if not prefix.is_relative_to(Path("/home")) and not prefix.is_relative_to(
+        Path("/root")
+    ):
+        return []
+    arguments: list[str] = []
+    parent = prefix.parent
+    parents: list[Path] = []
+    while parent not in {Path("/"), Path("/home"), Path("/root")}:
+        parents.append(parent)
+        parent = parent.parent
+    for directory in reversed(parents):
+        arguments.extend(["--dir", str(directory)])
+    arguments.extend(["--ro-bind", str(prefix), str(prefix)])
+    return arguments
+
+
+def _sandbox_runtime_mounts() -> list[str]:
+    bwrap = Path("/usr/bin/bwrap")
+    if not bwrap.is_file():
+        raise RuntimeError("bubblewrap runtime is unavailable")
+    arguments = [
+        "--dir", "/usr",
+        "--dir", "/usr/bin",
+        "--ro-bind", str(bwrap), str(bwrap),
+    ]
+    for directory in (Path("/lib"), Path("/lib64"), Path("/usr/lib")):
+        if directory.is_dir():
+            arguments.extend(["--dir", str(directory), "--ro-bind", str(directory), str(directory)])
+    return arguments
+
+
+def _sandbox_command(
+    runtime_path: Path,
+    stage: str,
+    *,
+    observation_path: Path | None = None,
+    model_input_path: Path | None = None,
+    model_input_encoding: str | None = None,
+) -> list[str]:
+    sandbox = shutil.which("bwrap")
+    if sandbox is None:
+        raise RuntimeError("bubblewrap is required for zero-write candidate replay")
+    executable = Path(sys.executable).resolve()
+    command = [
+        sandbox,
+        *_sandbox_runtime_mounts(),
+        "--tmpfs", "/tmp",
+        "--tmpfs", "/run",
+        "--tmpfs", "/home",
+        "--tmpfs", "/root",
+        *_sandbox_prefix_mounts(),
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--unshare-net",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--new-session",
+        "--die-with-parent",
+        "--cap-drop", "ALL",
+        "--dir", "/tmp/sandbox",
+        "--ro-bind", str(WORKER.resolve()), "/tmp/sandbox/worker.py",
+        "--dir", "/tmp/candidate",
+        "--ro-bind", str(runtime_path.parent.resolve()), "/tmp/candidate",
+    ]
+    if model_input_path is not None:
+        command.extend(["--ro-bind", str(model_input_path), "/tmp/model-input.bin"])
+    command.extend(
+        [
+            "--clearenv",
+            "--setenv", "HOME", "/tmp",
+            "--setenv", "TMPDIR", "/tmp",
+            "--setenv", "PATH", str(executable.parent),
+            "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
+            "--setenv", "PYTHONHASHSEED", "0",
+            "--chdir", "/tmp/candidate",
+            str(executable), "/tmp/sandbox/worker.py",
+            "--stage", stage,
+            "--runtime-package", f"/tmp/candidate/{runtime_path.name}",
+        ]
+    )
+    if observation_path is not None:
+        command.extend(["--observation", f"/tmp/candidate/{observation_path.name}"])
+    if model_input_path is not None and model_input_encoding is not None:
+        command.extend(
+            ["--model-input", "/tmp/model-input.bin", "--model-input-encoding", model_input_encoding]
+        )
+    return command
+
+
+def _run_candidate_stage(command: list[str], timeout_s: float) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout_s, check=False
+        )
+    except subprocess.TimeoutExpired as error:
+        raise TimeoutError("candidate replay stage exceeded its sandbox deadline") from error
+    marked = [
+        line.removeprefix(WORKER_MARKER)
+        for line in completed.stdout.splitlines()
+        if line.startswith(WORKER_MARKER)
+    ]
+    if len(marked) != 1:
+        detail = completed.stderr.strip()
+        raise RuntimeError(
+            "candidate sandbox stage returned an invalid number of results"
+            + (f": {detail}" if detail else "")
+        )
+    try:
+        result = json.loads(marked[-1])
+    except json.JSONDecodeError as error:
+        raise RuntimeError("candidate sandbox stage returned invalid JSON") from error
+    if not isinstance(result, dict):
+        raise TypeError("candidate sandbox stage result must be an object")
+    status = result.get("status")
+    if completed.returncode not in {0, 2} or (
+        completed.returncode == 0 and status != "completed"
+    ) or (completed.returncode == 2 and status == "completed"):
+        raise RuntimeError("candidate sandbox stage exit status is inconsistent")
+    return result
+
+
+def _stage_payload(result: dict[str, Any]) -> tuple[bytes, str]:
+    encoded = result.get("payload_base64")
+    encoding = result.get("encoding")
+    if not isinstance(encoded, str) or not isinstance(encoding, str):
+        raise TypeError("candidate sandbox stage omitted its evidence payload")
+    try:
+        return base64.b64decode(encoded, validate=True), encoding
+    except ValueError as error:
+        raise ValueError("candidate sandbox stage payload is not valid base64") from error
+
+
 def candidate(args: argparse.Namespace) -> dict[str, Any]:
     _adapter_plan("candidate")
     runtime_path = args.runtime_package.resolve()
@@ -168,14 +282,13 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
     candidate_id: str | None = None
     package_sha256: str | None = None
     observation_sha256: str | None = None
-    model_input: Any = None
-    output: Any = None
-    publishers = 0
-    writes = 0
+    preprocessed_sha256 = _sha256_json({"candidate_value": "preprocessing-pending"})
+    output_sha256 = _sha256_json({"candidate_value": "inference-pending"})
     diagnostics: dict[str, Any] = {
         "preprocessing": "pending",
         "inference": "pending",
         "output_validation": "pending",
+        "sandbox_policy": SANDBOX_POLICY,
     }
     try:
         package = _read_object(runtime_path, "candidate runtime package")
@@ -198,24 +311,87 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             )
             for name, reference in artifact_references.items()
         }
-        configuration = _read_object(
-            artifacts["configuration"], "candidate configuration"
-        )
+        _read_object(artifacts["configuration"], "candidate configuration")
         action_definition = _read_object(
             artifacts["action_definition"], "candidate action definition"
         )
+        safety = _read_object(args.control_contract.resolve(), "trusted control contract")
+        trusted_action = safety.get("control_contract")
+        if not isinstance(trusted_action, dict):
+            raise TypeError("trusted control contract action definition is absent")
+        contract_fields = (
+            "action_definition_id",
+            "command_type",
+            "joint_names",
+            "value_dimension",
+            "maximum_output_age_ns",
+        )
+        if any(
+            action_definition.get(name) != trusted_action.get(name)
+            for name in contract_fields
+        ):
+            raise ValueError(
+                "candidate action definition does not match the trusted control contract"
+            )
         observation = _read_object(observation_path, "candidate observation")
         observation_sha256 = _sha256_file(observation_path)
         runtime = package.get("runtime")
         if not isinstance(runtime, dict) or runtime.get("kind") != "python-callable-v1":
             raise ValueError("candidate runtime kind is unsupported")
 
-        preprocess = _entrypoint(runtime, artifacts, "preprocess")
-        inference = _entrypoint(runtime, artifacts, "inference")
-        model_input = preprocess(observation, configuration)
+        preprocess_result = _run_candidate_stage(
+            _sandbox_command(
+                runtime_path, "preprocess", observation_path=observation_path
+            ),
+            args.timeout_s,
+        )
+        if preprocess_result.get("status") != "completed":
+            raise RuntimeError(
+                "candidate sandbox preprocessing failed: "
+                f"{preprocess_result.get('reason', 'unknown')}"
+            )
+        model_input, model_input_encoding = _stage_payload(preprocess_result)
+        preprocessed_sha256 = hashlib.sha256(model_input).hexdigest()
         diagnostics["preprocessing"] = "completed"
-        output = inference(model_input, configuration)
+        diagnostics["preprocessed_input_encoding"] = model_input_encoding
+        model_input_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as stream:
+                stream.write(model_input)
+                model_input_path = Path(stream.name)
+            inference_result = _run_candidate_stage(
+                _sandbox_command(
+                    runtime_path,
+                    "inference",
+                    model_input_path=model_input_path,
+                    model_input_encoding=model_input_encoding,
+                ),
+                args.timeout_s,
+            )
+        finally:
+            if model_input_path is not None:
+                model_input_path.unlink(missing_ok=True)
+        if inference_result.get("status") != "completed":
+            try:
+                output_evidence, output_encoding = _stage_payload(inference_result)
+                output_sha256 = hashlib.sha256(output_evidence).hexdigest()
+                diagnostics["candidate_output_encoding"] = output_encoding
+            except (TypeError, ValueError):
+                pass
+            raise RuntimeError(
+                "candidate sandbox inference failed: "
+                f"{inference_result.get('reason', 'unknown')}"
+            )
+        output_content, output_encoding = _stage_payload(inference_result)
+        output_sha256 = hashlib.sha256(output_content).hexdigest()
         diagnostics["inference"] = "completed"
+        diagnostics["candidate_output_encoding"] = output_encoding
+        if output_encoding != "canonical-json":
+            raise TypeError("candidate inference output must be JSON-serializable")
+        try:
+            output = json.loads(output_content)
+        except json.JSONDecodeError as error:
+            raise TypeError("candidate inference output is not valid JSON") from error
         if not isinstance(output, dict):
             raise TypeError("candidate inference output must be an object")
 
@@ -225,20 +401,22 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             raise TypeError("candidate command publisher count must be an integer")
         if not isinstance(writes_value, int) or isinstance(writes_value, bool):
             raise TypeError("candidate write count must be an integer")
-        publishers = publishers_value
-        writes = writes_value
-        if publishers != 0 or writes != 0:
-            raise RuntimeError("candidate violated zero-write mode")
+        diagnostics["candidate_reported_command_publishers_created"] = publishers_value
+        diagnostics["candidate_reported_writes"] = writes_value
+        if publishers_value != 0:
+            raise RuntimeError("candidate reported a publisher creation")
+        if writes_value != 0:
+            raise RuntimeError("candidate reported a write")
 
-        expected_names = action_definition.get("joint_names")
+        expected_names = trusted_action.get("joint_names")
         values = output.get("values")
-        if output.get("action_definition_id") != action_definition.get(
+        if output.get("action_definition_id") != trusted_action.get(
             "action_definition_id"
         ):
             raise ValueError("candidate output action definition is incompatible")
         if output.get("joint_names") != expected_names:
             raise ValueError("candidate output joint names or order do not match")
-        if not isinstance(values, list) or len(values) != action_definition.get(
+        if not isinstance(values, list) or len(values) != trusted_action.get(
             "value_dimension"
         ):
             raise ValueError("candidate output dimension does not match")
@@ -251,17 +429,19 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("candidate output values must be finite numbers")
         timestamp_ns = output.get("timestamp_ns")
         captured_at_ns = observation.get("captured_at_ns")
-        maximum_age_ns = action_definition.get("maximum_output_age_ns")
+        maximum_age_ns = trusted_action.get("maximum_output_age_ns")
         if not isinstance(timestamp_ns, int) or isinstance(timestamp_ns, bool):
             raise TypeError("candidate output timestamp_ns must be an integer")
         if not isinstance(captured_at_ns, int) or not isinstance(maximum_age_ns, int):
             raise TypeError("candidate timestamp contract is invalid")
+        if timestamp_ns > captured_at_ns:
+            raise ValueError("candidate output timestamp is in the future")
         if captured_at_ns - timestamp_ns > maximum_age_ns:
             raise ValueError("candidate output timestamp is stale")
 
         diagnostics.update(
             {
-                "action_definition_id": action_definition["action_definition_id"],
+                "action_definition_id": trusted_action["action_definition_id"],
                 "output_validation": "compatible",
             }
         )
@@ -293,8 +473,8 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             deployment_status="admitted",
             candidate_package_sha256=package_sha256,
             input_observation_sha256=observation_sha256,
-            preprocessed_input_sha256=_sha256_json(model_input),
-            candidate_output_sha256=_sha256_json(output),
+            preprocessed_input_sha256=preprocessed_sha256,
+            candidate_output_sha256=output_sha256,
             ignored_candidate_claims=ignored_claims,
             diagnostics=diagnostics,
         )
@@ -308,8 +488,6 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             diagnostics=diagnostics,
             physical_rollout_attempts_consumed=0,
             robot_runtime_consumed_s=0,
-            command_publishers_created=publishers,
-            writes=writes,
         )
         if candidate_id is not None:
             result["candidate_id"] = candidate_id
@@ -317,10 +495,8 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
             result["candidate_package_sha256"] = package_sha256
         if observation_sha256 is not None:
             result["input_observation_sha256"] = observation_sha256
-        if model_input is not None:
-            result["preprocessed_input_sha256"] = _sha256_json(model_input)
-        if output is not None:
-            result["candidate_output_sha256"] = _sha256_json(output)
+        result["preprocessed_input_sha256"] = preprocessed_sha256
+        result["candidate_output_sha256"] = output_sha256
         return result
 
 
@@ -420,6 +596,8 @@ def parse_args() -> argparse.Namespace:
     candidate_parser.add_argument("--runtime-package", type=Path, required=True)
     candidate_parser.add_argument("--observation", type=Path, required=True)
     candidate_parser.add_argument("--controller-trace", type=Path, required=True)
+    candidate_parser.add_argument("--control-contract", type=Path, required=True)
+    candidate_parser.add_argument("--timeout-s", type=float, required=True)
 
     release_parser = subparsers.add_parser("release")
     release_parser.add_argument("--controller-trace", type=Path)

@@ -142,7 +142,21 @@ class InvocationEvaluationIntegrationTest(unittest.TestCase):
         )
         safety = root / "safety.json"
         safety.write_text(
-            json.dumps({"schema_version": 1, "mode": "zero-write"}) + "\n",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "mode": "zero-write",
+                    "control_contract": {
+                        "action_definition_id": "g1-right-arm-position-v001",
+                        "command_type": "joint_position",
+                        "joint_names": joint_names,
+                        "value_dimension": len(joint_names),
+                        "maximum_output_age_ns": 100_000_000,
+                    },
+                },
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
         budget = root / "budget.json"
