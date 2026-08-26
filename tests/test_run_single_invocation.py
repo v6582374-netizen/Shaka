@@ -20,26 +20,16 @@ def sha256_file(path: Path) -> str:
 
 class SingleInvocationRunnerTest(unittest.TestCase):
     def write_fixture(self, root: Path) -> Path:
-        candidate_script = root / "candidate.py"
-        candidate_script.write_text(
-            """
-import json
-print(json.dumps({
-    "deployment_status": "completed",
-    "command_publishers_created": 0,
-    "writes": 0,
-    "deployment_evidence": {"preprocessing": "offline-deterministic"}
-}, sort_keys=True))
-""".lstrip(),
-            encoding="utf-8",
-        )
         candidate_package = root / "candidate-package.json"
         candidate_package.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
                     "candidate_id": "candidate-v001",
-                    "entrypoint": [sys.executable, str(candidate_script)],
+                    "deployment_evidence": {
+                        "preprocessing": "offline-deterministic",
+                        "output_shape": [26],
+                    },
                 },
                 indent=2,
                 sort_keys=True,
@@ -50,6 +40,22 @@ print(json.dumps({
         safety_config = root / "safety.json"
         safety_config.write_text(
             json.dumps({"schema_version": 1, "mode": "zero-write"}) + "\n",
+            encoding="utf-8",
+        )
+        budget_artifact = root / "budget.json"
+        budget_artifact.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "physical_rollout_budget": 0,
+                    "robot_runtime_budget_s": 0,
+                    "frozen_contracts_sha256": "1" * 64,
+                    "global_stop_reasons": ["zero_write_validation_complete"],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
         manifest = root / "run-manifest.json"
@@ -74,6 +80,10 @@ print(json.dumps({
                     },
                     "maximum_duration_s": 2.0,
                     "budget_reference": "offline-budget-001",
+                    "budget_artifact": {
+                        "path": str(budget_artifact),
+                        "sha256": sha256_file(budget_artifact),
+                    },
                     "rollback_candidate_id": "candidate-v000",
                     "output_root": str(root / "runs"),
                     "recorder": {
@@ -149,6 +159,7 @@ print(json.dumps({
                     "control_released",
                     "evidence_completed",
                     "evaluation_completed",
+                    "reset_disposition_recorded",
                     "terminal_report_prepared",
                 ],
             )
@@ -177,14 +188,39 @@ print(json.dumps({
                 report["artifacts"]["safety_configuration"]["sha256"],
                 manifest_content["safety_config"]["sha256"],
             )
+            self.assertEqual(
+                report["artifacts"]["budget_artifact"]["sha256"],
+                manifest_content["budget_artifact"]["sha256"],
+            )
             readiness_path = (
                 run_directory / report["artifacts"]["readiness_result"]["path"]
             )
             readiness = json.loads(readiness_path.read_text())
             self.assertTrue(readiness["ready"])
             self.assertEqual(readiness["execution_mode"], "zero-write")
+            self.assertEqual(readiness["control_authority"], "exclusive_local_claim")
+            self.assertEqual(readiness["competing_command_publishers"], 0)
             self.assertEqual(readiness["command_publishers_created"], 0)
             self.assertEqual(readiness["writes"], 0)
+            evaluation_path = (
+                run_directory / report["artifacts"]["evaluation_result"]["path"]
+            )
+            evaluation = json.loads(evaluation_path.read_text())
+            evidence_manifest = (
+                run_directory
+                / report["artifacts"]["invocation_evidence"]["path"]
+                / "sha256.txt"
+            )
+            self.assertEqual(
+                evaluation["input_manifest_sha256"], sha256_file(evidence_manifest)
+            )
+            self.assertIsInstance(evaluation["visual_facts"], dict)
+            reset_path = run_directory / report["artifacts"]["reset_result"]["path"]
+            reset = json.loads(reset_path.read_text())
+            self.assertFalse(reset["requested"])
+            self.assertEqual(
+                reset["reason"], "zero_write_validation_is_not_a_task_attempt"
+            )
             self.assertTrue(
                 (run_directory / report["artifacts"]["invocation_evidence"]["path"])
                 .joinpath("sha256.txt")
@@ -194,6 +230,19 @@ print(json.dumps({
             recorder_audit = (root / "recorder-audit.jsonl").read_text()
             self.assertNotIn("publisher", recorder_audit)
             self.assertNotIn("write", recorder_audit)
+            adapter_audit = [
+                json.loads(line)
+                for line in (run_directory / "artifacts" / "adapter-audit.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            self.assertEqual(
+                [event["adapter"] for event in adapter_audit],
+                ["readiness", "candidate", "release", "evaluation", "reset"],
+            )
+            for event in adapter_audit:
+                self.assertEqual(event["command_publishers_created"], 0)
+                self.assertEqual(event["writes"], 0)
 
     def test_rejects_unsupported_mode_before_starting_the_recorder(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -206,6 +255,33 @@ print(json.dumps({
             self.assertEqual(completed.returncode, 2)
             result = json.loads(completed.stdout)
             self.assertIn("only the 'zero-write'", result["reason"])
+            self.assertEqual(result["command_publishers_created"], 0)
+            self.assertEqual(result["writes"], 0)
+            self.assertFalse((root / "recorder-audit.jsonl").exists())
+            self.assertFalse((root / "runs").exists())
+
+    def test_rejects_a_write_enabled_safety_configuration_before_recording(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            content = json.loads(manifest.read_text())
+            safety_path = Path(content["safety_config"]["path"])
+            safety_path.write_text(
+                json.dumps({"schema_version": 1, "mode": "write-enabled"}) + "\n",
+                encoding="utf-8",
+            )
+            content["safety_config"]["sha256"] = sha256_file(safety_path)
+            manifest.write_text(json.dumps(content), encoding="utf-8")
+
+            completed = self.run_cli(root, manifest)
+
+            self.assertEqual(completed.returncode, 2)
+            result = json.loads(completed.stdout)
+            self.assertIn(
+                "safety configuration must enforce zero-write", result["reason"]
+            )
             self.assertEqual(result["command_publishers_created"], 0)
             self.assertEqual(result["writes"], 0)
             self.assertFalse((root / "recorder-audit.jsonl").exists())
@@ -310,19 +386,10 @@ print(json.dumps({
             content = json.loads(manifest.read_text())
             package_path = Path(content["candidate"]["package_path"])
             package = json.loads(package_path.read_text())
-            candidate_script = Path(package["entrypoint"][1])
-            candidate_script.write_text(
-                """
-import json
-print(json.dumps({
-    "deployment_status": "completed",
-    "command_publishers_created": 0,
-    "writes": 0,
-    "task_result": "succeeded"
-}, sort_keys=True))
-""".lstrip(),
-                encoding="utf-8",
-            )
+            package["task_result"] = "succeeded"
+            package_path.write_text(json.dumps(package), encoding="utf-8")
+            content["candidate"]["package_sha256"] = sha256_file(package_path)
+            manifest.write_text(json.dumps(content), encoding="utf-8")
 
             completed = self.run_cli(root, manifest)
 
@@ -331,10 +398,16 @@ print(json.dumps({
             self.assertIn("must not contain a task result", result["reason"])
             self.assertEqual(result["command_publishers_created"], 0)
             self.assertEqual(result["writes"], 0)
-            self.assertFalse((root / "runs" / "RUN-001").exists())
-            partial = root / "runs" / ".RUN-001.partial"
-            self.assertTrue(partial.is_dir())
-            self.assertFalse(any(partial.glob("terminal-report*.json")))
+            run_directory = root / "runs" / "RUN-001"
+            self.assertTrue(run_directory.is_dir())
+            self.assertFalse((root / "runs" / ".RUN-001.partial").exists())
+            reports = list(run_directory.glob("terminal-report*.json"))
+            self.assertEqual(len(reports), 1)
+            report = json.loads(reports[0].read_text())
+            self.assertEqual(report["completed_stage"], "recorder_ready")
+            self.assertIn("must not contain a task result", report["terminal_reason"])
+            self.assertEqual(report["command_publishers_created"], 0)
+            self.assertEqual(report["writes"], 0)
 
 
 if __name__ == "__main__":

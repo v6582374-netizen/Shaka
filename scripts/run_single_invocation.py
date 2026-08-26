@@ -12,15 +12,71 @@ import selectors
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 RECORDER = Path(__file__).with_name("record_evaluator_episode.py")
+ADAPTER = Path(__file__).with_name("_offline_invocation_adapter.py")
 
 
 class ManifestError(ValueError):
-    pass
+    """The submitted manifest is invalid and the run was not accepted."""
+
+
+class InvocationFailed(RuntimeError):
+    """An accepted invocation stopped with a published terminal report."""
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        super().__init__(str(result["reason"]))
+        self.result = result
+
+
+@dataclass(frozen=True)
+class VerifiedArtifact:
+    path: Path
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ValidatedManifest:
+    path: Path
+    value: dict[str, Any]
+    sha256: str
+    run_id: str
+    invocation_id: str
+    output_root: Path
+    maximum_duration_s: float
+    candidate_id: str
+    candidate_package: VerifiedArtifact
+    safety_config: VerifiedArtifact
+    budget_artifact: VerifiedArtifact
+    evaluator_version: str
+    post_roll_s: float
+    minimum_camera_frames: int
+    minimum_state_samples: int
+
+
+@dataclass(frozen=True)
+class RunPaths:
+    final: Path
+    partial: Path
+    claim: Path
+    artifacts: Path
+    lifecycle: Path
+    evidence_root: Path
+    manifest_copy: Path
+    candidate_copy: Path
+    safety_copy: Path
+    budget_copy: Path
+    adapter_audit: Path
+    recorder_transcript: Path
+
+
+@dataclass
+class RunProgress:
+    completed_stage: str = "invocation_authority_acquired"
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,7 +130,7 @@ def _artifact_path(manifest_path: Path, value: Any, description: str) -> Path:
 
 def _verified_artifact(
     manifest_path: Path, value: Any, description: str
-) -> tuple[Path, str]:
+) -> VerifiedArtifact:
     if not isinstance(value, dict):
         raise ManifestError(f"{description} must be an object")
     path = _artifact_path(manifest_path, value.get("path"), description)
@@ -86,10 +142,31 @@ def _verified_artifact(
     actual_digest = _sha256_file(path)
     if actual_digest != expected_digest:
         raise ManifestError(f"{description} digest does not match: {path}")
-    return path, actual_digest
+    return VerifiedArtifact(path, actual_digest)
 
 
-def _validate_manifest(manifest_path: Path) -> dict[str, Any]:
+def _validate_budget(value: dict[str, Any]) -> None:
+    if value.get("schema_version") != 1:
+        raise ManifestError("budget artifact schema_version must be 1")
+    if value.get("physical_rollout_budget") != 0:
+        raise ManifestError("zero-write physical rollout budget must be 0")
+    if value.get("robot_runtime_budget_s") != 0:
+        raise ManifestError("zero-write robot runtime budget must be 0")
+    contracts_digest = value.get("frozen_contracts_sha256")
+    if not isinstance(contracts_digest, str) or len(contracts_digest) != 64:
+        raise ManifestError(
+            "budget artifact frozen_contracts_sha256 must be a 64-character digest"
+        )
+    stop_reasons = value.get("global_stop_reasons")
+    if (
+        not isinstance(stop_reasons, list)
+        or not stop_reasons
+        or any(not isinstance(reason, str) or not reason for reason in stop_reasons)
+    ):
+        raise ManifestError("budget artifact global_stop_reasons must be non-empty")
+
+
+def _validate_manifest(manifest_path: Path) -> ValidatedManifest:
     manifest_path = manifest_path.resolve()
     manifest = _read_object(manifest_path, "run manifest")
     if manifest.get("schema_version") != 1:
@@ -97,8 +174,7 @@ def _validate_manifest(manifest_path: Path) -> dict[str, Any]:
 
     run_id = _identity(manifest, "run_id")
     invocation_id = _identity(manifest, "invocation_id")
-    execution_mode = _required_string(manifest, "execution_mode")
-    if execution_mode != "zero-write":
+    if _required_string(manifest, "execution_mode") != "zero-write":
         raise ManifestError("only the 'zero-write' execution mode is supported")
 
     for name in (
@@ -114,14 +190,11 @@ def _validate_manifest(manifest_path: Path) -> dict[str, Any]:
     if not isinstance(maximum_duration_s, (int, float)) or maximum_duration_s <= 0:
         raise ManifestError("maximum_duration_s must be positive")
 
-    output_root = _artifact_path(
-        manifest_path, manifest.get("output_root"), "output root"
-    )
     candidate = manifest.get("candidate")
     if not isinstance(candidate, dict):
         raise ManifestError("candidate must be an object")
     candidate_id = _required_string(candidate, "candidate_id")
-    candidate_package, candidate_digest = _verified_artifact(
+    candidate_package = _verified_artifact(
         manifest_path,
         {
             "path": candidate.get("package_path"),
@@ -129,26 +202,28 @@ def _validate_manifest(manifest_path: Path) -> dict[str, Any]:
         },
         "candidate package",
     )
-    package = _read_object(candidate_package, "candidate package")
+    package = _read_object(candidate_package.path, "candidate package")
     if package.get("schema_version") != 1:
         raise ManifestError("candidate package schema_version must be 1")
     if package.get("candidate_id") != candidate_id:
         raise ManifestError(
             "candidate package identity does not match the run manifest"
         )
-    entrypoint = package.get("entrypoint")
-    if (
-        not isinstance(entrypoint, list)
-        or not entrypoint
-        or any(not isinstance(item, str) or not item for item in entrypoint)
-    ):
-        raise ManifestError(
-            "candidate package entrypoint must be a non-empty string list"
-        )
+    if not isinstance(package.get("deployment_evidence"), dict):
+        raise ManifestError("candidate package deployment_evidence must be an object")
 
-    safety_config, safety_digest = _verified_artifact(
+    safety_config = _verified_artifact(
         manifest_path, manifest.get("safety_config"), "safety configuration"
     )
+    safety = _read_object(safety_config.path, "safety configuration")
+    if safety.get("schema_version") != 1 or safety.get("mode") != "zero-write":
+        raise ManifestError("safety configuration must enforce zero-write")
+
+    budget_artifact = _verified_artifact(
+        manifest_path, manifest.get("budget_artifact"), "budget artifact"
+    )
+    _validate_budget(_read_object(budget_artifact.path, "budget artifact"))
+
     recorder = manifest.get("recorder", {})
     if not isinstance(recorder, dict):
         raise ManifestError("recorder must be an object")
@@ -162,24 +237,25 @@ def _validate_manifest(manifest_path: Path) -> dict[str, Any]:
     if not isinstance(minimum_state_samples, int) or minimum_state_samples < 1:
         raise ManifestError("recorder minimum_state_samples must be positive")
 
-    return {
-        "path": manifest_path,
-        "value": manifest,
-        "sha256": _sha256_file(manifest_path),
-        "run_id": run_id,
-        "invocation_id": invocation_id,
-        "output_root": output_root,
-        "maximum_duration_s": float(maximum_duration_s),
-        "candidate_id": candidate_id,
-        "candidate_package": candidate_package,
-        "candidate_package_sha256": candidate_digest,
-        "candidate_entrypoint": entrypoint,
-        "safety_config": safety_config,
-        "safety_config_sha256": safety_digest,
-        "post_roll_s": float(post_roll_s),
-        "minimum_camera_frames": minimum_camera_frames,
-        "minimum_state_samples": minimum_state_samples,
-    }
+    return ValidatedManifest(
+        path=manifest_path,
+        value=manifest,
+        sha256=_sha256_file(manifest_path),
+        run_id=run_id,
+        invocation_id=invocation_id,
+        output_root=_artifact_path(
+            manifest_path, manifest.get("output_root"), "output root"
+        ),
+        maximum_duration_s=float(maximum_duration_s),
+        candidate_id=candidate_id,
+        candidate_package=candidate_package,
+        safety_config=safety_config,
+        budget_artifact=budget_artifact,
+        evaluator_version=_required_string(manifest, "evaluator_version"),
+        post_roll_s=float(post_roll_s),
+        minimum_camera_frames=minimum_camera_frames,
+        minimum_state_samples=minimum_state_samples,
+    )
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -203,6 +279,11 @@ def _append_stage(path: Path, stage: str, **values: Any) -> None:
         stream.flush()
 
 
+def _complete_stage(paths: RunPaths, progress: RunProgress, stage: str) -> None:
+    _append_stage(paths.lifecycle, stage)
+    progress.completed_stage = stage
+
+
 def _remaining(deadline: float) -> float:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -215,9 +296,12 @@ def _read_process_event(
 ) -> dict[str, Any]:
     assert process.stdout is not None
     selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
-    if not selector.select(_remaining(deadline)):
-        raise TimeoutError("recorder did not produce a lifecycle event in time")
+    try:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        if not selector.select(_remaining(deadline)):
+            raise TimeoutError("recorder did not produce a lifecycle event in time")
+    finally:
+        selector.close()
     line = process.stdout.readline()
     if not line:
         stderr = process.stderr.read() if process.stderr is not None else ""
@@ -235,43 +319,35 @@ def _read_process_event(
     return event
 
 
-def _run_candidate(
-    manifest: dict[str, Any], deadline: float, artifacts_directory: Path
+def _run_adapter(
+    adapter: str,
+    arguments: list[str],
+    output_path: Path,
+    paths: RunPaths,
+    deadline: float,
 ) -> dict[str, Any]:
     environment = os.environ.copy()
-    environment.update(
-        {
-            "SHAKA_RUN_ID": manifest["run_id"],
-            "SHAKA_INVOCATION_ID": manifest["invocation_id"],
-            "SHAKA_EXECUTION_MODE": "zero-write",
-        }
-    )
+    environment["SHAKA_INVOCATION_ADAPTER_AUDIT"] = str(paths.adapter_audit)
     completed = subprocess.run(
-        manifest["candidate_entrypoint"],
+        [sys.executable, str(ADAPTER), adapter, *arguments],
         env=environment,
         capture_output=True,
         text=True,
         timeout=_remaining(deadline),
         check=False,
     )
-    (artifacts_directory / "candidate.stderr.txt").write_text(
-        completed.stderr, encoding="utf-8"
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(f"candidate process exited with {completed.returncode}")
     try:
         result = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise RuntimeError("candidate output is not valid JSON") from error
+        raise RuntimeError(f"{adapter} adapter returned invalid JSON") from error
     if not isinstance(result, dict):
-        raise TypeError("candidate output must be a JSON object")
-    if "task_result" in result:
-        raise RuntimeError("candidate output must not contain a task result")
-    if result.get("deployment_status") != "completed":
-        raise RuntimeError("candidate deployment did not complete")
+        raise TypeError(f"{adapter} adapter result must be a JSON object")
+    _write_json(output_path, result)
+    if completed.returncode != 0:
+        reason = result.get("reason", completed.stderr.strip())
+        raise RuntimeError(f"{adapter} adapter failed: {reason}")
     if result.get("command_publishers_created") != 0 or result.get("writes") != 0:
-        raise RuntimeError("zero-write candidate reported a publisher or write")
-    _write_json(artifacts_directory / "candidate-result.json", result)
+        raise RuntimeError(f"{adapter} adapter violated zero-write mode")
     return result
 
 
@@ -279,175 +355,304 @@ def _artifact(path: Path, relative_to: Path) -> dict[str, str]:
     return {"path": str(path.relative_to(relative_to)), "sha256": _sha256_file(path)}
 
 
-def run(manifest_path: Path) -> dict[str, Any]:
-    manifest = _validate_manifest(manifest_path)
-    output_root: Path = manifest["output_root"]
-    run_id: str = manifest["run_id"]
-    invocation_id: str = manifest["invocation_id"]
-    final_directory = output_root / run_id
-    partial_directory = output_root / f".{run_id}.partial"
-    claim_directory = output_root / ".invocation-claims" / invocation_id
-    if final_directory.exists() or partial_directory.exists():
-        raise ManifestError(f"run output already exists: {run_id}")
-    if claim_directory.exists():
-        raise ManifestError(f"invocation identity was already used: {invocation_id}")
+def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
+    candidates = {
+        "run_manifest": paths.manifest_copy,
+        "candidate_package": paths.candidate_copy,
+        "safety_configuration": paths.safety_copy,
+        "budget_artifact": paths.budget_copy,
+        "readiness_result": paths.artifacts / "readiness-result.json",
+        "candidate_result": paths.artifacts / "candidate-result.json",
+        "control_release": paths.artifacts / "control-release.json",
+        "recorder_lifecycle": paths.recorder_transcript,
+        "evaluation_result": paths.artifacts / "evaluation-result.json",
+        "reset_result": paths.artifacts / "reset-result.json",
+        "adapter_audit": paths.adapter_audit,
+        "lifecycle_journal": paths.lifecycle,
+    }
+    artifacts: dict[str, Any] = {
+        name: _artifact(path, paths.partial)
+        for name, path in candidates.items()
+        if path.is_file()
+    }
+    evidence = paths.evidence_root / paths.claim.name
+    evidence_manifest = evidence / "sha256.txt"
+    if evidence_manifest.is_file():
+        artifacts["invocation_evidence"] = {
+            "path": str(evidence.relative_to(paths.partial)),
+            "manifest_sha256": _sha256_file(evidence_manifest),
+        }
+    else:
+        partial_evidence = paths.evidence_root / f".{paths.claim.name}.partial"
+        if partial_evidence.exists():
+            artifacts["partial_invocation_evidence"] = {
+                "path": str(partial_evidence.relative_to(paths.partial))
+            }
+    return artifacts
 
-    output_root.mkdir(parents=True, exist_ok=True)
-    claim_directory.parent.mkdir(parents=True, exist_ok=True)
-    claim_directory.mkdir()
-    (claim_directory / "run-id.txt").write_text(run_id + "\n", encoding="utf-8")
-    partial_directory.mkdir()
-    artifacts_directory = partial_directory / "artifacts"
-    artifacts_directory.mkdir()
-    candidate_package_snapshot = artifacts_directory / "candidate-package.json"
-    candidate_package_snapshot.write_bytes(manifest["candidate_package"].read_bytes())
-    safety_config_snapshot = artifacts_directory / "safety-configuration.json"
-    safety_config_snapshot.write_bytes(manifest["safety_config"].read_bytes())
-    lifecycle_path = partial_directory / "lifecycle.jsonl"
-    evidence_root = partial_directory / "evidence"
-    manifest_copy = partial_directory / "run-manifest.json"
-    manifest_copy.write_bytes(manifest["path"].read_bytes())
 
-    _append_stage(lifecycle_path, "manifest_validated")
-    _append_stage(lifecycle_path, "invocation_authority_acquired")
-    readiness_path = artifacts_directory / "readiness-result.json"
-    _write_json(
-        readiness_path,
+def _terminal_report(
+    manifest: ValidatedManifest,
+    paths: RunPaths,
+    completed_stage: str,
+    terminal_reason: str,
+    task_result: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "run_id": manifest.run_id,
+        "invocation_id": manifest.invocation_id,
+        "execution_mode": "zero-write",
+        "manifest_sha256": manifest.sha256,
+        "completed_stage": completed_stage,
+        "terminal_reason": terminal_reason,
+        "task_result": task_result,
+        "next_disposition": "stop_zero_write_validation",
+        "command_publishers_created": 0,
+        "writes": 0,
+        "artifacts": _existing_artifacts(paths),
+    }
+
+
+def _publish_failure(
+    manifest: ValidatedManifest,
+    paths: RunPaths,
+    progress: RunProgress,
+    error: Exception,
+) -> NoReturn:
+    reason = str(error) or type(error).__name__
+    _append_stage(paths.lifecycle, "terminal_report_prepared", outcome="failed")
+    report = _terminal_report(
+        manifest,
+        paths,
+        completed_stage=progress.completed_stage,
+        terminal_reason=reason,
+        task_result="not_evaluated",
+    )
+    _write_json(paths.partial / "terminal-report.json", report)
+    os.replace(paths.partial, paths.final)
+    raise InvocationFailed(
         {
-            "ready": True,
-            "execution_mode": "zero-write",
+            "result": "zero_write_invocation_failed",
+            "reason": reason,
+            "run_id": manifest.run_id,
+            "invocation_id": manifest.invocation_id,
+            "output_directory": str(paths.final),
             "command_publishers_created": 0,
             "writes": 0,
-        },
-    )
-    _append_stage(lifecycle_path, "readiness_confirmed")
+        }
+    ) from error
 
-    deadline = time.monotonic() + manifest["maximum_duration_s"]
-    recorder_command = [
+
+def _accept_run(manifest: ValidatedManifest) -> RunPaths:
+    final = manifest.output_root / manifest.run_id
+    partial = manifest.output_root / f".{manifest.run_id}.partial"
+    claim = manifest.output_root / ".invocation-claims" / manifest.invocation_id
+    if final.exists() or partial.exists():
+        raise ManifestError(f"run output already exists: {manifest.run_id}")
+    if claim.exists():
+        raise ManifestError(
+            f"invocation identity was already used: {manifest.invocation_id}"
+        )
+
+    manifest.output_root.mkdir(parents=True, exist_ok=True)
+    claim.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        claim.mkdir()
+    except FileExistsError as error:
+        raise ManifestError(
+            f"invocation identity was already used: {manifest.invocation_id}"
+        ) from error
+    (claim / "run-id.txt").write_text(manifest.run_id + "\n", encoding="utf-8")
+    try:
+        partial.mkdir()
+    except FileExistsError as error:
+        raise ManifestError(f"run output already exists: {manifest.run_id}") from error
+
+    artifacts = partial / "artifacts"
+    artifacts.mkdir()
+    paths = RunPaths(
+        final=final,
+        partial=partial,
+        claim=claim,
+        artifacts=artifacts,
+        lifecycle=partial / "lifecycle.jsonl",
+        evidence_root=partial / "evidence",
+        manifest_copy=partial / "run-manifest.json",
+        candidate_copy=artifacts / "candidate-package.json",
+        safety_copy=artifacts / "safety-configuration.json",
+        budget_copy=artifacts / "budget-artifact.json",
+        adapter_audit=artifacts / "adapter-audit.jsonl",
+        recorder_transcript=artifacts / "recorder-stdout.jsonl",
+    )
+    paths.manifest_copy.write_bytes(manifest.path.read_bytes())
+    paths.candidate_copy.write_bytes(manifest.candidate_package.path.read_bytes())
+    paths.safety_copy.write_bytes(manifest.safety_config.path.read_bytes())
+    paths.budget_copy.write_bytes(manifest.budget_artifact.path.read_bytes())
+    _append_stage(paths.lifecycle, "manifest_validated")
+    _append_stage(paths.lifecycle, "invocation_authority_acquired")
+    return paths
+
+
+def _start_recorder(
+    manifest: ValidatedManifest, paths: RunPaths
+) -> subprocess.Popen[str]:
+    command = [
         sys.executable,
         str(RECORDER),
         "--episode-id",
-        invocation_id,
+        manifest.invocation_id,
         "--output-root",
-        str(evidence_root),
+        str(paths.evidence_root),
         "--duration-s",
-        str(manifest["maximum_duration_s"]),
+        str(manifest.maximum_duration_s),
         "--post-roll-s",
-        str(manifest["post_roll_s"]),
+        str(manifest.post_roll_s),
         "--minimum-camera-frames",
-        str(manifest["minimum_camera_frames"]),
+        str(manifest.minimum_camera_frames),
         "--minimum-state-samples",
-        str(manifest["minimum_state_samples"]),
+        str(manifest.minimum_state_samples),
         "--lifecycle-handshake",
     ]
-    recorder = subprocess.Popen(
-        recorder_command,
+    return subprocess.Popen(
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
     )
-    recorder_transcript_path = artifacts_directory / "recorder-stdout.jsonl"
+
+
+def run(manifest_path: Path) -> dict[str, Any]:
+    manifest = _validate_manifest(manifest_path)
+    paths = _accept_run(manifest)
+    progress = RunProgress()
+    deadline = time.monotonic() + manifest.maximum_duration_s
+    recorder: subprocess.Popen[str] | None = None
     try:
-        with recorder_transcript_path.open("w", encoding="utf-8") as transcript:
+        readiness = _run_adapter(
+            "readiness",
+            [
+                "--claim-directory",
+                str(paths.claim),
+                "--execution-mode",
+                "zero-write",
+            ],
+            paths.artifacts / "readiness-result.json",
+            paths,
+            deadline,
+        )
+        if readiness.get("ready") is not True:
+            raise RuntimeError("readiness adapter did not establish readiness")
+        _complete_stage(paths, progress, "readiness_confirmed")
+
+        recorder = _start_recorder(manifest, paths)
+        with paths.recorder_transcript.open("w", encoding="utf-8") as transcript:
             while True:
-                recorder_event = _read_process_event(recorder, deadline, transcript)
-                if recorder_event.get("event") == "read_only_recorder_ready":
+                event = _read_process_event(recorder, deadline, transcript)
+                if event.get("event") == "read_only_recorder_ready":
                     break
-                if recorder_event.get("event") == "read_only_recorder_failed":
+                if event.get("event") == "read_only_recorder_failed":
                     raise RuntimeError(
-                        f"recorder failed before ready: {recorder_event.get('reason')}"
+                        f"recorder failed before ready: {event.get('reason')}"
                     )
-            _append_stage(lifecycle_path, "recorder_ready")
+            _complete_stage(paths, progress, "recorder_ready")
 
-            _run_candidate(manifest, deadline, artifacts_directory)
-            _append_stage(lifecycle_path, "candidate_completed")
+            candidate_result = _run_adapter(
+                "candidate",
+                ["--package", str(paths.candidate_copy)],
+                paths.artifacts / "candidate-result.json",
+                paths,
+                deadline,
+            )
+            if candidate_result.get("candidate_id") != manifest.candidate_id:
+                raise RuntimeError("candidate adapter returned the wrong identity")
+            if candidate_result.get("deployment_status") != "completed":
+                raise RuntimeError("candidate deployment did not complete")
+            _complete_stage(paths, progress, "candidate_completed")
 
-            control_release = {
-                "released": True,
-                "command_publishers_created": 0,
-                "writes": 0,
-            }
-            _write_json(artifacts_directory / "control-release.json", control_release)
-            _append_stage(lifecycle_path, "control_released")
+            release = _run_adapter(
+                "release",
+                [],
+                paths.artifacts / "control-release.json",
+                paths,
+                deadline,
+            )
+            if release.get("released") is not True:
+                raise RuntimeError("control release adapter did not release authority")
+            _complete_stage(paths, progress, "control_released")
 
             recorder.terminate()
             while True:
-                recorder_event = _read_process_event(recorder, deadline, transcript)
-                if recorder_event.get("event") == "read_only_recorder_completed":
+                event = _read_process_event(recorder, deadline, transcript)
+                if event.get("event") == "read_only_recorder_completed":
                     break
-                if recorder_event.get("event") == "read_only_recorder_failed":
+                if event.get("event") == "read_only_recorder_failed":
                     raise RuntimeError(
-                        f"recorder failed after stop: {recorder_event.get('reason')}"
+                        f"recorder failed after stop: {event.get('reason')}"
                     )
         recorder.wait(timeout=_remaining(deadline))
         if recorder.returncode != 0:
             stderr = recorder.stderr.read() if recorder.stderr is not None else ""
             raise RuntimeError(f"recorder exited with {recorder.returncode}: {stderr}")
+
+        evidence_manifest = paths.evidence_root / manifest.invocation_id / "sha256.txt"
+        if not evidence_manifest.is_file():
+            raise RuntimeError("recorder did not publish complete invocation evidence")
+        _complete_stage(paths, progress, "evidence_completed")
+
+        evaluation = _run_adapter(
+            "evaluation",
+            [
+                "--evidence-manifest",
+                str(evidence_manifest),
+                "--evaluator-version",
+                manifest.evaluator_version,
+            ],
+            paths.artifacts / "evaluation-result.json",
+            paths,
+            deadline,
+        )
+        task_result = evaluation.get("task_result")
+        if task_result not in {"succeeded", "failed", "indeterminate", "aborted"}:
+            raise RuntimeError("evaluation adapter returned an invalid task result")
+        _complete_stage(paths, progress, "evaluation_completed")
+
+        reset = _run_adapter(
+            "reset",
+            ["--execution-mode", "zero-write", "--task-result", str(task_result)],
+            paths.artifacts / "reset-result.json",
+            paths,
+            deadline,
+        )
+        if reset.get("requested") is not False:
+            raise RuntimeError("zero-write reset adapter requested a reset")
+        _complete_stage(paths, progress, "reset_disposition_recorded")
+    except Exception as error:  # noqa: BLE001 - every accepted run must terminate
+        if recorder is not None and recorder.poll() is None:
+            recorder.kill()
+            recorder.wait()
+        _publish_failure(manifest, paths, progress, error)
     finally:
-        if recorder.poll() is None:
+        if recorder is not None and recorder.poll() is None:
             recorder.kill()
             recorder.wait()
 
-    evidence_directory = evidence_root / invocation_id
-    evidence_manifest = evidence_directory / "sha256.txt"
-    if not evidence_manifest.is_file():
-        raise RuntimeError("recorder did not publish complete invocation evidence")
-    _append_stage(lifecycle_path, "evidence_completed")
-
-    evaluation = {
-        "task_result": "indeterminate",
-        "reason": "offline zero-write validation does not establish a task outcome",
-        "evaluator_version": manifest["value"]["evaluator_version"],
-    }
-    evaluation_path = artifacts_directory / "evaluation-result.json"
-    _write_json(evaluation_path, evaluation)
-    _append_stage(lifecycle_path, "evaluation_completed")
-    _append_stage(lifecycle_path, "terminal_report_prepared")
-
-    candidate_result_path = artifacts_directory / "candidate-result.json"
-    control_release_path = artifacts_directory / "control-release.json"
-    terminal_report = {
-        "schema_version": 1,
-        "run_id": run_id,
-        "invocation_id": invocation_id,
-        "execution_mode": "zero-write",
-        "manifest_sha256": manifest["sha256"],
-        "completed_stage": "terminal_report",
-        "terminal_reason": "zero_write_invocation_completed",
-        "task_result": evaluation["task_result"],
-        "next_disposition": "stop_zero_write_validation",
-        "command_publishers_created": 0,
-        "writes": 0,
-        "artifacts": {
-            "run_manifest": _artifact(manifest_copy, partial_directory),
-            "candidate_package": _artifact(
-                candidate_package_snapshot, partial_directory
-            ),
-            "safety_configuration": _artifact(
-                safety_config_snapshot, partial_directory
-            ),
-            "readiness_result": _artifact(readiness_path, partial_directory),
-            "candidate_result": _artifact(candidate_result_path, partial_directory),
-            "control_release": _artifact(control_release_path, partial_directory),
-            "recorder_lifecycle": _artifact(
-                recorder_transcript_path, partial_directory
-            ),
-            "invocation_evidence": {
-                "path": str(evidence_directory.relative_to(partial_directory)),
-                "manifest_sha256": _sha256_file(evidence_manifest),
-            },
-            "evaluation_result": _artifact(evaluation_path, partial_directory),
-            "lifecycle_journal": _artifact(lifecycle_path, partial_directory),
-        },
-    }
-    _write_json(partial_directory / "terminal-report.json", terminal_report)
-    os.replace(partial_directory, final_directory)
+    _append_stage(paths.lifecycle, "terminal_report_prepared")
+    report = _terminal_report(
+        manifest,
+        paths,
+        completed_stage="terminal_report",
+        terminal_reason="zero_write_invocation_completed",
+        task_result=str(task_result),
+    )
+    _write_json(paths.partial / "terminal-report.json", report)
+    os.replace(paths.partial, paths.final)
     return {
         "result": "zero_write_invocation_completed",
-        "run_id": run_id,
-        "invocation_id": invocation_id,
-        "output_directory": str(final_directory),
+        "run_id": manifest.run_id,
+        "invocation_id": manifest.invocation_id,
+        "output_directory": str(paths.final),
         "command_publishers_created": 0,
         "writes": 0,
     }
@@ -457,6 +662,9 @@ def main() -> int:
     args = parse_args()
     try:
         result = run(args.manifest)
+    except InvocationFailed as error:
+        print(json.dumps(error.result, sort_keys=True), flush=True)
+        return 2
     except Exception as error:  # noqa: BLE001 - CLI emits one machine-readable result
         print(
             json.dumps(
