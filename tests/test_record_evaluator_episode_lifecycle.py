@@ -94,7 +94,7 @@ class RecorderLifecycleTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            process = self.start_recorder(root)
+            process = self.start_recorder(root, duration_s=0.03)
             ready = self.read_event(process)
             self.assertEqual(ready["event"], "read_only_recorder_ready")
             self.assert_zero_write(ready)
@@ -161,6 +161,34 @@ class RecorderLifecycleTest(unittest.TestCase):
                 ),
                 3,
             )
+            self.assert_runtime_is_read_only(root)
+
+    def test_lifecycle_storage_failure_is_still_reported_to_the_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            process = self.start_recorder(root)
+            ready = self.read_event(process)
+            self.assertEqual(ready["event"], "read_only_recorder_ready")
+
+            lifecycle_path = (
+                root
+                / "evidence"
+                / ".INVOCATION-21.partial"
+                / "recorder_lifecycle.jsonl"
+            )
+            lifecycle_path.unlink()
+            lifecycle_path.mkdir()
+            process.terminate()
+
+            failed = self.read_event(process)
+            _, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 2, stderr)
+            self.assertEqual(failed["event"], "read_only_recorder_failed")
+            self.assertTrue(failed["ready"])
+            self.assertEqual(failed["phase"], "post_roll")
+            self.assertIn("directory", failed["reason"].lower())
+            self.assert_zero_write(failed)
+            self.assertFalse((root / "evidence" / "INVOCATION-21").exists())
             self.assert_runtime_is_read_only(root)
 
     def test_initialization_failure_stays_partial_and_reports_never_ready(self) -> None:

@@ -136,12 +136,11 @@ PYTHONPATH=/home/loongge/TWIST2-master/unitree_sdk2/python_binding/build-py310/l
 python scripts/record_evaluator_episode.py \
   --episode-id INVOCATION-ID \
   --output-root /path/to/evidence \
-  --duration-s 600 \
   --lifecycle-handshake \
   --post-roll-s 1.0
 ```
 
-`--duration-s` 在此模式下是防止失控录制的上限，而不是候选时长。记录器只有在隐藏的 partial 调用目录、全部输出文件、三个 DDS reader、三路物理相机订阅以及每类观测的首个样本都可用后，才在 stdout 输出 `read_only_recorder_ready` JSON 行。调用运行器应等待该事件后再启动候选；候选结束并释放控制权后向记录器发送 `SIGTERM`。记录器输出 `read_only_recorder_stop_requested`，继续录制 `--post-roll-s`，随后原子化发布调用目录并输出 `read_only_recorder_completed`。`SIGINT` 是操作中断，不能当作正常停止。
+握手模式不使用 `--duration-s` 推测候选时长。记录器只有在隐藏的 partial 调用目录、全部输出文件、三个 DDS reader、三路物理相机订阅以及每类观测的首个样本都可用后，才在 stdout 输出 `read_only_recorder_ready` JSON 行。调用运行器应等待该事件后再启动候选；候选结束并释放控制权后向记录器发送 `SIGTERM`。记录器输出 `read_only_recorder_stop_requested`，继续录制完整的 `--post-roll-s`，随后原子化发布调用目录并输出 `read_only_recorder_completed`。`SIGINT` 是操作中断，不能当作正常停止。
 
 初始化或运行失败输出 `read_only_recorder_failed`，包含失败 `phase`、`ready` 和 `reason`。失败目录保持为 `.<episode-id>.partial`，其中 `recorder_lifecycle.jsonl` 保留同样的阶段信息；它不会被提升为完整调用证据。不指定 `--lifecycle-handshake` 时，原固定时长入口仍只在结束时输出单个结果 JSON。
 

@@ -255,10 +255,9 @@ class RecorderLifecycle:
         self,
         event: str,
         *,
-        persist: bool = True,
         publish: bool = True,
         **values: Any,
-    ) -> dict[str, Any]:
+    ) -> None:
         payload = {
             "event": event,
             "episode_id": self.episode_id,
@@ -268,14 +267,18 @@ class RecorderLifecycle:
             "writes": 0,
             **values,
         }
-        if persist and self.partial_directory.is_dir():
-            with (self.partial_directory / "recorder_lifecycle.jsonl").open(
-                "a", encoding="utf-8"
-            ) as stream:
-                _json_line(stream, payload)
+        try:
+            if self.partial_directory.is_dir():
+                with (self.partial_directory / "recorder_lifecycle.jsonl").open(
+                    "a", encoding="utf-8"
+                ) as stream:
+                    _json_line(stream, payload)
+        except OSError:
+            if publish and self.publish_events and event == "read_only_recorder_failed":
+                print(json.dumps(payload, sort_keys=True), flush=True)
+            raise
         if publish and self.publish_events:
             print(json.dumps(payload, sort_keys=True), flush=True)
-        return payload
 
 
 def _sources_available(counts: dict[str, int]) -> bool:
@@ -440,14 +443,16 @@ def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str,
                 sockets[socket] = spec
 
             lifecycle.phase = "waiting_for_observations"
-            deadline = time.monotonic() + args.duration_s
+            deadline = (
+                None if lifecycle_handshake else time.monotonic() + args.duration_s
+            )
             stop_deadline: float | None = None
             while True:
                 now = time.monotonic()
                 if stop_deadline is not None and now >= stop_deadline:
                     termination_reason = "external_stop_request"
                     break
-                if now >= deadline:
+                if deadline is not None and now >= deadline:
                     break
                 for socket, _ in poller.poll(20):
                     spec = sockets[socket]
