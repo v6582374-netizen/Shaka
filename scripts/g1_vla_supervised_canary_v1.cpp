@@ -354,6 +354,17 @@ bool ConsumeAuthorization(const Args& args, const Package& package) {
   return true;
 }
 
+void RecordStage(const Args& args, const Package& package, const char* stage, uint64_t writes) noexcept {
+  const std::string path = args.run_directory + "/supervised-p0-" + package.digest + ".events.jsonl";
+  const int descriptor = open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
+  if (descriptor < 0) return;
+  const std::string event = std::string("{\"stage\":\"") + stage + "\",\"package_sha256\":\"" +
+                            package.digest + "\",\"arm_writes\":" + std::to_string(writes) + "}\n";
+  (void)write(descriptor, event.data(), event.size());
+  (void)fsync(descriptor);
+  close(descriptor);
+}
+
 Args ParseArgs(int argc, char** argv) {
   Args args;
   for (int index = 1; index < argc; ++index) {
@@ -411,10 +422,12 @@ int Run(const Args& args) {
   ValidateFiniteStationary(monitor.Fresh().state);
   if (activity.samples() != 0) Reject("rt/arm_sdk became active during the final execution gate");
   if (!ConsumeAuthorization(args, package)) Reject("this immutable P0 package was already consumed");
+  RecordStage(args, package, "authorization_consumed", 0);
 
   auto publisher = std::make_shared<unitree::robot::ChannelPublisher<LowCmd>>(kArmSdkTopic);
   publisher->InitChannel();
   uint64_t writes = 0;
+  RecordStage(args, package, "publisher_created", writes);
   const auto started = std::chrono::steady_clock::now();
   auto publish = [&](double target, double weight) {
     const Snapshot current = monitor.Fresh();
@@ -430,6 +443,7 @@ int Run(const Args& args) {
       publish(entry.state.motor_state().at(kActiveMotorIndex).q(), 0.0);
     }
     for (int tick = 0; tick < kActiveTicks; ++tick) {
+      if (tick == 0) RecordStage(args, package, "active_motion_started", writes);
       std::this_thread::sleep_until(started + std::chrono::milliseconds((kPrefillTicks + tick) * kCommandPeriodMs));
       const double blend = static_cast<double>(tick + 1) / kActiveTicks;
       const double target = entry.state.motor_state().at(kActiveMotorIndex).q() * (1.0 - blend) + final_target * blend;
@@ -437,18 +451,22 @@ int Run(const Args& args) {
       publish(target, 1.0);
     }
   } catch (...) {
+    RecordStage(args, package, "abort_release_started", writes);
     // The same unconditional release below is used for an exception path.
     for (int tick = 0; tick < kReleaseTicks; ++tick) {
       try { publish(entry.state.motor_state().at(kActiveMotorIndex).q(), 1.0 - static_cast<double>(tick + 1) / kReleaseTicks); }
       catch (...) { break; }
       std::this_thread::sleep_for(std::chrono::milliseconds(kCommandPeriodMs));
     }
+    RecordStage(args, package, "abort_release_finished", writes);
     throw;
   }
+  RecordStage(args, package, "normal_release_started", writes);
   for (int tick = 0; tick < kReleaseTicks; ++tick) {
     publish(entry.state.motor_state().at(kActiveMotorIndex).q(), 1.0 - static_cast<double>(tick + 1) / kReleaseTicks);
     std::this_thread::sleep_for(std::chrono::milliseconds(kCommandPeriodMs));
   }
+  RecordStage(args, package, "normal_release_finished", writes);
   PrintResult("g1_vla_supervised_p0_completed", "one bounded wrist-direction canary released authority", &package, writes, monitor);
   return 0;
 }
