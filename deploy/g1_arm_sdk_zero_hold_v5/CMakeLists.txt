@@ -7,7 +7,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Threads REQUIRED)
 
-set(UNITREE_SDK_ROOT /home/unitree/unitree_sdk2)
+set(UNITREE_SDK_ROOT /home/unitree/unitree_sdk2 CACHE PATH
+  "Unitree SDK2 root; override when building on an auxiliary host")
 find_library(UNITREE_SDK_LIBRARY unitree_sdk2
   PATHS "${UNITREE_SDK_ROOT}/lib/${CMAKE_SYSTEM_PROCESSOR}"
   NO_DEFAULT_PATH)
@@ -51,3 +52,7 @@ target_link_libraries(g1_arm_sdk_zero_hold_v5 PRIVATE unitree_sdk2)
 add_executable(g1_vla_execute_v7
   ../../scripts/g1_vla_execute_v7.cpp)
 target_link_libraries(g1_vla_execute_v7 PRIVATE unitree_sdk2)
+
+add_executable(g1_vla_supervised_canary_v1
+  ../../scripts/g1_vla_supervised_canary_v1.cpp)
+target_link_libraries(g1_vla_supervised_canary_v1 PRIVATE unitree_sdk2)

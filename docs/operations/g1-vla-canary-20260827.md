@@ -45,3 +45,21 @@ The validator only makes an attestation reviewable; it cannot prove that a
 guardian has been installed inside `humanoid`. The current system has no such
 robot-side deployment attestation or workspace/contact truth producer, so a
 package cannot yet pass this gate honestly.
+
+## Supervised P0 physical canary
+
+The unattended gate above remains the requirement for P1 autonomous operation.
+It is not the only way to establish the first observed physical VLA loop. The
+separate `scripts/prepare_g1_vla_supervised_canary.py` creates an unarmed P0
+package from one completed connected-G1 zero-write invocation. The matching
+`g1_vla_supervised_canary_v1` executable is intentionally restricted to one
+attempt: it takes only `left_wrist_yaw_joint`'s VLA output as a direction bit,
+caps physical travel at 0.01 rad, holds all remaining arm joints at their
+measured entry positions, sends no BrainCo hand command, then releases
+`rt/arm_sdk` over one second.
+
+This is evidence for a supervised, bounded physical actuation loop only. It
+does not claim workspace/contact protection, network-loss fail-closed behavior,
+or readiness for unattended autonomy. The package itself is always unarmed;
+the hardware executable additionally requires an explicit `--execute` and the
+exact package SHA-256 as its single-use authorization value.
