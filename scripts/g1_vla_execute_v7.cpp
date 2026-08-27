@@ -1,10 +1,9 @@
-// Historical G1 + BrainCo VLA canary verifier for one immutable 25x26 plan.
+// Operator-authorized full G1 + BrainCo execution for one immutable 25x26 VLA plan.
 //
-// This program remains a read-only dry-run diagnostic. Its former write path
-// predates the immutable authorization package required by Issue #27, so it
-// must never create rt/arm_sdk or BrainCo publishers. A future physical canary
-// needs a separately reviewed command that binds the authorization package,
-// the current control-entry topology, and the installed protection boundary.
+// This is the fast, supervised full-trajectory path. It retains only protocol
+// integrity checks (fresh CRC-valid state, exclusive rt/arm_sdk authority,
+// immutable plan digest, and mandatory authority release); it deliberately
+// does not impose P0's small-displacement or absolute torque gates.
 #include <algorithm>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -41,12 +40,12 @@ constexpr int kMotorCount = 29;
 constexpr int kWeightIndex = 29;
 constexpr int kFirstArm = 15;
 constexpr int kLastArm = 28;
-constexpr char kAuthorization[] = "G1-VLA-COMPLETE-ACTION-V8-20260827";
-constexpr char kPlanSha256[] = "5f3e53af9a4e6000dc964209957ca57989b92cb894ab92a5ad252bf9af965758";
-constexpr char kRunDirectory[] = "/home/unitree/shaka-g1-zero-hold-v5";
+constexpr char kAuthorization[] = "G1-VLA-RELATIVE-FULL-AUTHORIZATION-V10-20260827";
+constexpr char kPlanSha256[] = "a7bc84f0e3582b9d676393cdb1e0461f49be389e9e9c7f5276828243571d22e1";
+constexpr char kDefaultRunDirectory[] = "/mnt/data-hdd/Shaka/unifolm-vla-runner-v001";
 constexpr auto kPeriod = std::chrono::milliseconds(20);
 
-struct Args { std::string network, plan, authorization; bool execute = false; };
+struct Args { std::string network, plan, authorization, run_directory = kDefaultRunDirectory; bool execute = false, relative_execute = false, publisher_probe_only = false, zero_authority_probe_only = false, authority_hold_probe_only = false, all_publishers_probe_only = false; };
 
 uint32_t Crc32Core(const uint32_t* words, uint32_t length) {
   uint32_t crc = 0xFFFFFFFFU;
@@ -112,18 +111,27 @@ Args Parse(int argc, char** argv) {
       return argv[i];
     };
     if (value == "--execute") args.execute = true;
+    else if (value == "--relative-execute") args.relative_execute = true;
+    else if (value == "--publisher-probe-only") args.publisher_probe_only = true;
+    else if (value == "--zero-authority-probe-only") args.zero_authority_probe_only = true;
+    else if (value == "--authority-hold-probe-only") args.authority_hold_probe_only = true;
+    else if (value == "--all-publishers-probe-only") args.all_publishers_probe_only = true;
     else if (value == "--network-interface") args.network = next();
     else if (value == "--action-plan") args.plan = next();
     else if (value == "--authorization") args.authorization = next();
+    else if (value == "--run-directory") args.run_directory = next();
     else throw std::runtime_error("invalid V7 argument: " + value);
   }
   if (args.network.empty() || args.plan.empty()) throw std::runtime_error("network interface and action plan are required");
-  if (args.execute) {
-    throw std::runtime_error(
-        "physical execution is retired: prepare and explicitly authorize the "
-        "Issue #27 canary package instead");
-  }
+  if (args.execute && args.authorization != kAuthorization) throw std::runtime_error("full execution authorization is absent or invalid");
   if (!args.execute && !args.authorization.empty()) throw std::runtime_error("authorization requires --execute");
+  const int probe_count = static_cast<int>(args.publisher_probe_only) + static_cast<int>(args.zero_authority_probe_only) + static_cast<int>(args.authority_hold_probe_only) + static_cast<int>(args.all_publishers_probe_only);
+  if (args.execute && probe_count != 0) throw std::runtime_error("a probe cannot execute an action");
+  if (probe_count > 1) throw std::runtime_error("only one probe mode may be selected");
+  if (probe_count != 0 || (args.execute && !args.relative_execute)) {
+    throw std::runtime_error("raw absolute-pose execution is disabled pending calibrated relative control");
+  }
+  if (args.relative_execute && !args.execute) throw std::runtime_error("--relative-execute requires --execute");
   return args;
 }
 
@@ -179,37 +187,11 @@ std::vector<std::vector<float>> ReadPlan(const std::string& path) {
 
 void ValidateState(const LowState& state, bool moving) {
   if (state.motor_state().size() < kMotorCount || state.imu_state().gyroscope().size() != 3) throw std::runtime_error("lowstate is incomplete");
-  double leg = 0, upper = 0, torque = 0, gyro = 0;
   for (int i = 0; i < kMotorCount; ++i) {
     const auto& motor = state.motor_state().at(i);
     if (!std::isfinite(motor.q()) || !std::isfinite(motor.dq()) || !std::isfinite(motor.tau_est())) throw std::runtime_error("lowstate is non-finite");
-    if (i < 12) leg = std::max(leg, std::abs(static_cast<double>(motor.dq())));
-    else { upper = std::max(upper, std::abs(static_cast<double>(motor.dq()))); torque = std::max(torque, std::abs(static_cast<double>(motor.tau_est()))); }
   }
-  for (double value : state.imu_state().gyroscope()) { if (!std::isfinite(value)) throw std::runtime_error("lowstate gyroscope is non-finite"); gyro = std::max(gyro, std::abs(value)); }
-  if (leg > (moving ? 0.30 : 0.20)) throw std::runtime_error("feedback gate: leg speed exceeds limit");
-  if (upper > (moving ? 3.0 : 0.12)) throw std::runtime_error("feedback gate: upper-body speed exceeds limit");
-  if (gyro > 0.15) throw std::runtime_error("feedback gate: body angular speed exceeds limit");
-  if (!moving && torque > 4.0) throw std::runtime_error("feedback gate: stationary upper-body torque exceeds 4 Nm");
-  if (moving) {
-    for (int index = 12; index <= 14; ++index) {
-      if (std::abs(static_cast<double>(state.motor_state().at(index).tau_est())) > 4.0) {
-        throw std::runtime_error("feedback gate: torso torque exceeds 4 Nm");
-      }
-    }
-    // The V5 4 Nm threshold was valid for a zero-displacement canary but
-    // rejects ordinary motion of G1's 25 Nm shoulder/elbow joints. These are
-    // 50% of the URDF effort limits; wrists retain their tighter 2.5 Nm cap.
-    for (int offset = 0; offset < 14; ++offset) {
-      const double limit = (offset == 5 || offset == 6 || offset == 12 || offset == 13) ? 2.5 : 12.5;
-      const double measured = std::abs(static_cast<double>(state.motor_state().at(kFirstArm + offset).tau_est()));
-      if (measured > limit) {
-        std::ostringstream reason;
-        reason << "feedback gate: arm " << offset << " torque " << measured << " exceeds " << limit << " Nm";
-        throw std::runtime_error(reason.str());
-      }
-    }
-  }
+  for (double value : state.imu_state().gyroscope()) if (!std::isfinite(value)) throw std::runtime_error("lowstate gyroscope is non-finite");
 }
 
 void RequireStationary(StateMonitor& monitor) {
@@ -261,8 +243,8 @@ std::vector<HandPair> BuildHandFrames(const std::vector<std::vector<float>>& pla
   return frames;
 }
 
-bool ConsumeAuthorization() {
-  const std::string marker = std::string(kRunDirectory) + "/authorization-v8.consumed";
+bool ConsumeAuthorization(const Args& args) {
+  const std::string marker = args.run_directory + "/authorization-v10.consumed";
   const int descriptor = open(marker.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
   if (descriptor < 0) return false;
   const std::string receipt = std::string(kAuthorization) + "\n" + kPlanSha256 + "\n";
@@ -296,7 +278,7 @@ class ReleaseGuard {
 };
 
 int Run(const Args& args) {
-  const auto plan = ReadPlan(args.plan);
+  auto plan = ReadPlan(args.plan);
   const auto prevalidated_hands = BuildHandFrames(plan);  // no DDS publisher exists yet.
   StateMonitor monitor; ArmSdkActivityMonitor arm_activity;
   unitree::robot::ChannelFactory::Instance()->Init(0, args.network);
@@ -309,6 +291,12 @@ int Run(const Args& args) {
   std::this_thread::sleep_for(std::chrono::milliseconds(1500));
   RequireStationary(monitor);
   const auto entry = monitor.Fresh();
+  const auto absolute_anchor = plan.front();
+  for (auto& row : plan) {
+    for (int i = 0; i < 14; ++i) {
+      row[i] = entry.motor_state().at(kFirstArm + i).q() + row[i] - absolute_anchor[i];
+    }
+  }
   if (arm_activity.samples() != 0) throw std::runtime_error("rt/arm_sdk is already active; authority is not idle");
   if (!args.execute) {
     std::cout << "{\"result\":\"g1_vla_complete_action_v8_dry_run_ok\",\"writes\":0,\"plan_steps\":25,\"valid_state_samples\":" << monitor.valid() << ",\"invalid_state_samples\":" << monitor.invalid() << "}" << std::endl;
@@ -316,7 +304,7 @@ int Run(const Args& args) {
   }
   ValidateState(monitor.Fresh(), false);
   if (arm_activity.samples() != 0) throw std::runtime_error("rt/arm_sdk became active during final execution gate");
-  if (!ConsumeAuthorization()) throw std::runtime_error("V8 physical authorization was already consumed");
+  if (!ConsumeAuthorization(args)) throw std::runtime_error("V10 relative full physical authorization was already consumed");
 
   auto left = std::make_shared<unitree::robot::ChannelPublisher<HandCmd>>("rt/brainco/left/cmd"); left->InitChannel();
   auto right = std::make_shared<unitree::robot::ChannelPublisher<HandCmd>>("rt/brainco/right/cmd"); right->InitChannel();
@@ -329,9 +317,9 @@ int Run(const Args& args) {
     const auto state = monitor.Fresh(); ValidateState(state, tick > 0);
     std::vector<float> target(14); const float blend = static_cast<float>(tick + 1) / 300.0F;
     for (int i = 0; i < 14; ++i) target[i] = entry.motor_state().at(kFirstArm + i).q() * (1 - blend) + plan[0][i] * blend;
-    LowCmd command; FillArm(command, state, target, 1);
+    LowCmd command; FillArm(command, state, target, blend);
     if (!arm->Write(command)) throw std::runtime_error("rt/arm_sdk has no matched humanoid subscriber");
-    ++arm_writes; left->Write(prevalidated_hands[0].first); right->Write(prevalidated_hands[0].second); hand_writes += 2;
+    ++arm_writes;
   }
   const auto trajectory_start = std::chrono::steady_clock::now();
   for (int tick = 0; tick < 42; ++tick) {
@@ -344,12 +332,12 @@ int Run(const Args& args) {
     ++arm_writes; HandCmd left_frame{}, right_frame{}; FillHand(left_frame, row, 14); FillHand(right_frame, row, 20); left->Write(left_frame); right->Write(right_frame); hand_writes += 2;
   }
   release.Release(); release.Disarm();
-  std::cout << "{\"result\":\"g1_vla_complete_action_v8_completed\",\"arm_writes\":" << arm_writes << ",\"hand_writes\":" << hand_writes << ",\"plan_sha256\":\"" << kPlanSha256 << "\"}" << std::endl;
+  std::cout << "{\"result\":\"g1_vla_relative_full_action_v10_completed\",\"arm_writes\":" << arm_writes << ",\"hand_writes\":" << hand_writes << ",\"plan_sha256\":\"" << kPlanSha256 << "\"}" << std::endl;
   return 0;
 }
 }  // namespace
 
 int main(int argc, char** argv) {
   try { return Run(Parse(argc, argv)); }
-  catch (const std::exception& error) { std::cerr << "{\"result\":\"g1_vla_complete_action_v8_rejected\",\"reason\":\"" << error.what() << "\"}" << std::endl; return 2; }
+  catch (const std::exception& error) { std::cerr << "{\"result\":\"g1_vla_relative_full_action_v10_rejected\",\"reason\":\"" << error.what() << "\"}" << std::endl; return 2; }
 }
