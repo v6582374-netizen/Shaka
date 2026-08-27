@@ -8,6 +8,20 @@ connected-G1 path is available for the final physical admission gate:
 .venv/bin/python scripts/run_single_invocation.py --manifest /path/to/run-manifest.json
 ```
 
+For the frozen UniFoLM connected-G1 vertical slice, do not hand-edit a run
+manifest or reuse an invocation identity. The launcher creates a fresh,
+single-use manifest from the reviewed zero-write template:
+
+```bash
+.venv/bin/python scripts/run_connected_g1_vla_zero_write.py --execute
+```
+
+Omit `--execute` to prepare and inspect the fresh manifest only. This command
+has no physical mode and always records `physical_execution_authorized: false`.
+It sets a 900-second zero-write wall-clock budget so the frozen 18.98GB model
+can finish loading after live capture; this does not alter a physical-rollout
+budget.
+
 ## Connected-G1 zero-write acceptance
 
 Run this only after the offline candidate admission, evaluator configuration,
