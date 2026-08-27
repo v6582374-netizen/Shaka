@@ -13,10 +13,14 @@ from typing import Any
 from _offline_invocation_adapter import (
     _audit,
     _base,
-    candidate,
+    candidate as offline_candidate,
     evaluation,
     release,
     reset,
+)
+from run_unifolm_vla_invocation_candidate import (
+    RUNTIME_KIND as UNIFOLM_VLA_RUNTIME_KIND,
+    run_candidate as run_unifolm_vla_candidate,
 )
 from record_evaluator_episode import (
     CAMERAS,
@@ -170,6 +174,27 @@ def readiness(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def candidate(args: argparse.Namespace) -> dict[str, Any]:
+    """Dispatch only the fixed VLA zero-write runtime outside the sandbox.
+
+    All other candidates retain the generic bubblewrap replay boundary.  The
+    VLA path needs the pre-existing CUDA runtime and is still inference-only.
+    """
+    package = json.loads(args.runtime_package.read_text(encoding="utf-8"))
+    runtime = package.get("runtime")
+    if isinstance(runtime, dict) and runtime.get("kind") == UNIFOLM_VLA_RUNTIME_KIND:
+        if args.action_plan_output is None:
+            raise ValueError("UniFoLM-VLA candidate requires an action-plan output")
+        return run_unifolm_vla_candidate(
+            args.runtime_package,
+            args.observation,
+            args.action_plan_output,
+            args.controller_trace,
+            args.timeout_s,
+        )
+    return offline_candidate(args)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="adapter", required=True)
@@ -189,6 +214,7 @@ def parse_args() -> argparse.Namespace:
     candidate_parser.add_argument("--runtime-package", type=Path, required=True)
     candidate_parser.add_argument("--observation", type=Path, required=True)
     candidate_parser.add_argument("--controller-trace", type=Path, required=True)
+    candidate_parser.add_argument("--action-plan-output", type=Path)
     candidate_parser.add_argument("--control-contract", type=Path, required=True)
     candidate_parser.add_argument("--timeout-s", type=float, required=True)
 

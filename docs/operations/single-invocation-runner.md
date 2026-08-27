@@ -339,3 +339,15 @@ An invalid candidate output produces a `deployment_defect` terminal report with
 no `task_result`. It records zero physical rollout attempts and zero robot
 runtime consumption, releases invocation authority, and stops before independent
 task evaluation.
+
+## UniFoLM-VLA zero-write candidate
+
+`configs/unifolm-vla-brainco26-v001/candidate-package.json` defines the fixed
+25×26 BrainCo26 candidate. When it is bound into a connected-G1 zero-write
+manifest, the runner captures the recorder's current observation before
+candidate execution and invokes only the repository's fixed
+`run_unifolm_vla_zero_write_preflight.py` in the UniFoLM environment. Its
+immutable plan is retained as `artifacts/action-plan.json` alongside the
+controller trace. This path creates no DDS command publisher and cannot be
+used for physical execution; a write-enabled canary remains a separately
+authorized lifecycle extension.

@@ -128,6 +128,7 @@ class RunPaths:
     evaluator_prompt: Path
     controller_trace: Path
     controller_stdout: Path
+    action_plan: Path
     evidence_finalization: Path
     prepared_evidence: Path
     model_result: Path
@@ -334,7 +335,15 @@ def _candidate_artifacts(
     references = package.value.get("artifacts")
     if not isinstance(references, dict):
         raise ManifestError("candidate package artifacts must be an object")
-    required = {"configuration", "input_preprocessor", "action_definition"}
+    runtime = package.value.get("runtime")
+    if not isinstance(runtime, dict):
+        raise ManifestError("candidate runtime must be an object")
+    runtime_kind = runtime.get("kind")
+    required = (
+        {"configuration", "input_preprocessor", "action_definition"}
+        if runtime_kind == "python-callable-v1"
+        else {"configuration", "action_definition"}
+    )
     if not required.issubset(references):
         missing = ", ".join(sorted(required - references.keys()))
         raise ManifestError(f"candidate package is missing required artifacts: {missing}")
@@ -349,27 +358,41 @@ def _candidate_artifacts(
             package.path, reference, f"candidate artifact '{name}'"
         )
 
-    runtime = package.value.get("runtime")
-    if not isinstance(runtime, dict) or runtime.get("kind") != "python-callable-v1":
-        raise ManifestError("candidate runtime kind must be 'python-callable-v1'")
-    for stage in ("preprocess", "inference"):
-        entrypoint = runtime.get(stage)
-        if not isinstance(entrypoint, dict):
-            raise ManifestError(f"candidate runtime {stage} must be an object")
-        artifact_name = entrypoint.get("artifact")
-        callable_name = entrypoint.get("callable")
-        if artifact_name not in artifacts:
+    if runtime_kind == "python-callable-v1":
+        for stage in ("preprocess", "inference"):
+            entrypoint = runtime.get(stage)
+            if not isinstance(entrypoint, dict):
+                raise ManifestError(f"candidate runtime {stage} must be an object")
+            artifact_name = entrypoint.get("artifact")
+            callable_name = entrypoint.get("callable")
+            if artifact_name not in artifacts:
+                raise ManifestError(
+                    f"candidate runtime {stage} references an unknown artifact"
+                )
+            if (
+                not isinstance(callable_name, str)
+                or not callable_name.isidentifier()
+            ):
+                raise ManifestError(
+                    f"candidate runtime {stage} callable must be a Python identifier"
+                )
+            _validate_python_callable(artifacts[artifact_name], callable_name, stage)
+    elif runtime_kind == "unifolm-vla-zero-write-v1":
+        if runtime.get("configuration_artifact") != "configuration":
             raise ManifestError(
-                f"candidate runtime {stage} references an unknown artifact"
+                "UniFoLM-VLA runtime must bind its configuration artifact"
             )
+        configuration = _read_verified_object(
+            artifacts["configuration"], "UniFoLM-VLA configuration"
+        )
         if (
-            not isinstance(callable_name, str)
-            or not callable_name.isidentifier()
+            configuration.get("schema_version") != 1
+            or configuration.get("kind")
+            != "unifolm_vla_zero_write_candidate_configuration"
         ):
-            raise ManifestError(
-                f"candidate runtime {stage} callable must be a Python identifier"
-            )
-        _validate_python_callable(artifacts[artifact_name], callable_name, stage)
+            raise ManifestError("UniFoLM-VLA configuration has an unsupported identity")
+    else:
+        raise ManifestError("candidate runtime kind is unsupported")
 
     action = _read_verified_object(artifacts["action_definition"], "action definition")
     candidate_action = _validated_action_definition(
@@ -774,6 +797,7 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
         "control_release": paths.artifacts / "control-release.json",
         "controller_trace": paths.controller_trace,
         "controller_stdout": paths.controller_stdout,
+        "action_plan": paths.action_plan,
         "recorder_lifecycle": paths.recorder_transcript,
         "evidence_finalization": paths.evidence_finalization,
         "evaluation_result": paths.artifacts / "evaluation-result.json",
@@ -969,6 +993,7 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         evaluator_prompt=artifacts / "evaluator" / "prompt.md",
         controller_trace=artifacts / "controller-trace.json",
         controller_stdout=artifacts / "controller-stdout.jsonl",
+        action_plan=artifacts / "action-plan.json",
         evidence_finalization=artifacts / "evidence-finalization.json",
         prepared_evidence=artifacts / "prepared-evidence",
         model_result=artifacts / "model-assessment.json",
@@ -1179,6 +1204,8 @@ def run(manifest_path: Path, *, connected_g1: bool = False) -> dict[str, Any]:
                         str(paths.candidate_observation),
                         "--controller-trace",
                         str(paths.controller_trace),
+                        "--action-plan-output",
+                        str(paths.action_plan),
                         "--control-contract",
                         str(paths.safety_copy),
                         "--timeout-s",

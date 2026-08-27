@@ -1,0 +1,19 @@
+{
+  "artifacts": {
+    "action_definition": {
+      "path": "action-definition.json",
+      "sha256": "96ace99c4130ce45005b38e8b2e88ff2418f029c80a8b08a54908951e22ca064"
+    },
+    "configuration": {
+      "path": "candidate-configuration.json",
+      "sha256": "42987ebc56aec76ba87882456ce11d39b75ecb01c1200b62bb22dd33bd8851a5"
+    }
+  },
+  "candidate_id": "unifolm-vla-brainco26-v001",
+  "runtime": {
+    "configuration_artifact": "configuration",
+    "kind": "unifolm-vla-zero-write-v1"
+  },
+  "schema_version": 1,
+  "source_version": "brainco26-vla-action10k-b8-g16-v1-20260825"
+}

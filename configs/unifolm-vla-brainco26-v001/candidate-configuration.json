@@ -1,0 +1,7 @@
+{
+  "device": "cuda:0",
+  "instruction": "Press the yellow button to open the instrument lid.",
+  "kind": "unifolm_vla_zero_write_candidate_configuration",
+  "schema_version": 1,
+  "seed": 42
+}
