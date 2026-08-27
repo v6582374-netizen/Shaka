@@ -349,7 +349,11 @@ def _candidate_artifacts(
     if not required.issubset(references):
         missing = ", ".join(sorted(required - references.keys()))
         raise ManifestError(f"candidate package is missing required artifacts: {missing}")
-    if "implementation" not in references and "model" not in references:
+    if (
+        runtime_kind != "unifolm-vla-zero-write-v1"
+        and "implementation" not in references
+        and "model" not in references
+    ):
         raise ManifestError("candidate package must bind an implementation or model")
 
     artifacts: dict[str, VerifiedFile] = {}
