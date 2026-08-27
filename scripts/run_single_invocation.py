@@ -765,10 +765,7 @@ def _run_adapter(
         timeout=_remaining(deadline),
         check=False,
     )
-    try:
-        result = json.loads(completed.stdout)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(f"{adapter} adapter returned invalid JSON") from error
+    result = _adapter_result(completed.stdout, adapter)
     if not isinstance(result, dict):
         raise TypeError(f"{adapter} adapter result must be a JSON object")
     _write_json(output_path, result)
@@ -780,6 +777,24 @@ def _run_adapter(
     if result.get("command_publishers_created") != 0 or result.get("writes") != 0:
         raise RuntimeError(f"{adapter} adapter violated zero-write mode")
     return result
+
+
+def _adapter_result(stdout: str, adapter: str) -> dict[str, Any]:
+    """Read the final structured result despite native SDK diagnostic output.
+
+    Unitree's Python binding can write DDS initialization diagnostics to stdout
+    before the adapter emits its one JSON result. The trailing JSON object is
+    still the adapter's only protocol result; preceding diagnostics never alter
+    the lifecycle result.
+    """
+    for line in reversed(stdout.splitlines()):
+        try:
+            result = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(result, dict):
+            return result
+    raise RuntimeError(f"{adapter} adapter returned invalid JSON")
 
 
 def _artifact(path: Path, relative_to: Path) -> dict[str, str]:
