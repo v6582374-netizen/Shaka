@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "run_unifolm_vla_invocation_candidate.py"
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("unifolm_invocation_candidate", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -76,13 +77,15 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime, observation = self.write_runtime(root)
+            raw_action_plan = root / "action-plan-raw.json"
             action_plan = root / "action-plan.json"
+            static_admission = root / "static-admission.json"
             trace = root / "controller-trace.json"
 
             def fake_preflight(command: list[str], timeout_s: float) -> dict[str, object]:
                 self.assertIn(str(observation), command)
                 self.assertGreater(timeout_s, 0)
-                action_plan.write_text(
+                raw_action_plan.write_text(
                     json.dumps(
                         {
                             "schema_version": 1,
@@ -105,16 +108,24 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
                     "command_publishers_created": 0,
                     "writes": 0,
                     "action_plan": {
-                        "path": str(action_plan),
-                        "sha256": hashlib.sha256(action_plan.read_bytes()).hexdigest(),
+                        "path": str(raw_action_plan),
+                        "sha256": hashlib.sha256(raw_action_plan.read_bytes()).hexdigest(),
                     },
                 }
 
-            with patch.object(MODULE, "_run_preflight", fake_preflight):
+            with patch.object(MODULE, "_run_preflight", fake_preflight), patch.object(
+                MODULE, "STATIC_INPUTS", {}
+            ), patch.object(MODULE, "project", lambda plan, _: plan), patch.object(
+                MODULE,
+                "validate",
+                lambda *_: {"result": "g1_vla_action_plan_static_bounds_ok"},
+            ):
                 result = MODULE.run_candidate(
                     runtime,
                     observation,
+                    raw_action_plan,
                     action_plan,
+                    static_admission,
                     trace,
                     1.0,
                     python=Path(sys.executable),
@@ -131,6 +142,7 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
                 controller_trace["frames"][0]["action_plan_sha256"],
                 result["action_plan"]["sha256"],
             )
+            self.assertTrue(static_admission.is_file())
 
     def test_rejects_runtime_that_escapes_its_artifact_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

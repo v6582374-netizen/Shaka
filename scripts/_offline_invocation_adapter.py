@@ -597,7 +597,9 @@ def parse_args() -> argparse.Namespace:
     candidate_parser.add_argument("--runtime-package", type=Path, required=True)
     candidate_parser.add_argument("--observation", type=Path, required=True)
     candidate_parser.add_argument("--controller-trace", type=Path, required=True)
+    candidate_parser.add_argument("--raw-action-plan-output", type=Path)
     candidate_parser.add_argument("--action-plan-output", type=Path)
+    candidate_parser.add_argument("--static-admission-output", type=Path)
     candidate_parser.add_argument("--control-contract", type=Path, required=True)
     candidate_parser.add_argument("--timeout-s", type=float, required=True)
 

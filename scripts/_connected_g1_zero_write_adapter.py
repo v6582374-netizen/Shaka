@@ -183,12 +183,18 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
     package = json.loads(args.runtime_package.read_text(encoding="utf-8"))
     runtime = package.get("runtime")
     if isinstance(runtime, dict) and runtime.get("kind") == UNIFOLM_VLA_RUNTIME_KIND:
-        if args.action_plan_output is None:
-            raise ValueError("UniFoLM-VLA candidate requires an action-plan output")
+        if (
+            args.raw_action_plan_output is None
+            or args.action_plan_output is None
+            or args.static_admission_output is None
+        ):
+            raise ValueError("UniFoLM-VLA candidate requires all plan evidence outputs")
         return run_unifolm_vla_candidate(
             args.runtime_package,
             args.observation,
+            args.raw_action_plan_output,
             args.action_plan_output,
+            args.static_admission_output,
             args.controller_trace,
             args.timeout_s,
         )
@@ -214,7 +220,9 @@ def parse_args() -> argparse.Namespace:
     candidate_parser.add_argument("--runtime-package", type=Path, required=True)
     candidate_parser.add_argument("--observation", type=Path, required=True)
     candidate_parser.add_argument("--controller-trace", type=Path, required=True)
+    candidate_parser.add_argument("--raw-action-plan-output", type=Path)
     candidate_parser.add_argument("--action-plan-output", type=Path)
+    candidate_parser.add_argument("--static-admission-output", type=Path)
     candidate_parser.add_argument("--control-contract", type=Path, required=True)
     candidate_parser.add_argument("--timeout-s", type=float, required=True)
 

@@ -128,7 +128,9 @@ class RunPaths:
     evaluator_prompt: Path
     controller_trace: Path
     controller_stdout: Path
+    raw_action_plan: Path
     action_plan: Path
+    static_admission: Path
     evidence_finalization: Path
     prepared_evidence: Path
     model_result: Path
@@ -797,7 +799,9 @@ def _existing_artifacts(paths: RunPaths) -> dict[str, Any]:
         "control_release": paths.artifacts / "control-release.json",
         "controller_trace": paths.controller_trace,
         "controller_stdout": paths.controller_stdout,
+        "raw_action_plan": paths.raw_action_plan,
         "action_plan": paths.action_plan,
+        "static_admission": paths.static_admission,
         "recorder_lifecycle": paths.recorder_transcript,
         "evidence_finalization": paths.evidence_finalization,
         "evaluation_result": paths.artifacts / "evaluation-result.json",
@@ -993,7 +997,9 @@ def _accept_run(manifest: ValidatedManifest) -> RunPaths:
         evaluator_prompt=artifacts / "evaluator" / "prompt.md",
         controller_trace=artifacts / "controller-trace.json",
         controller_stdout=artifacts / "controller-stdout.jsonl",
+        raw_action_plan=artifacts / "action-plan-raw.json",
         action_plan=artifacts / "action-plan.json",
+        static_admission=artifacts / "static-admission.json",
         evidence_finalization=artifacts / "evidence-finalization.json",
         prepared_evidence=artifacts / "prepared-evidence",
         model_result=artifacts / "model-assessment.json",
@@ -1204,8 +1210,12 @@ def run(manifest_path: Path, *, connected_g1: bool = False) -> dict[str, Any]:
                         str(paths.candidate_observation),
                         "--controller-trace",
                         str(paths.controller_trace),
+                        "--raw-action-plan-output",
+                        str(paths.raw_action_plan),
                         "--action-plan-output",
                         str(paths.action_plan),
+                        "--static-admission-output",
+                        str(paths.static_admission),
                         "--control-contract",
                         str(paths.safety_copy),
                         "--timeout-s",
