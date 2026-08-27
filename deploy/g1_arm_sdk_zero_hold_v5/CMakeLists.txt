@@ -47,3 +47,7 @@ target_link_libraries(unitree_sdk2 INTERFACE ddsc ddscxx Threads::Threads)
 add_executable(g1_arm_sdk_zero_hold_v5
   ../../scripts/g1_arm_sdk_zero_hold_v5.cpp)
 target_link_libraries(g1_arm_sdk_zero_hold_v5 PRIVATE unitree_sdk2)
+
+add_executable(g1_vla_execute_v7
+  ../../scripts/g1_vla_execute_v7.cpp)
+target_link_libraries(g1_vla_execute_v7 PRIVATE unitree_sdk2)
