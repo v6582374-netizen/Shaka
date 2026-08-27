@@ -712,6 +712,25 @@ class SingleInvocationRunnerTest(unittest.TestCase):
                 readiness["observed_command_publishers"],
                 [{"topic": "rt/lowcmd", "participant_key": participant_key}],
             )
+            runtime = json.loads(
+                (
+                    root
+                    / "runs"
+                    / "RUN-001"
+                    / "artifacts"
+                    / "candidate-runtime-preflight.json"
+                ).read_text()
+            )
+            self.assertTrue(runtime["ready"])
+            stages = [
+                json.loads(line)["stage"]
+                for line in (root / "runs" / "RUN-001" / "lifecycle.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            self.assertLess(
+                stages.index("candidate_runtime_ready"), stages.index("recorder_ready")
+            )
 
     def test_connected_g1_verifies_rotating_native_motion_controller_topology(
         self,

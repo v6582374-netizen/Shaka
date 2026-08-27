@@ -169,6 +169,47 @@ def _run_preflight(
     return result
 
 
+def preflight_runtime(runtime_package: Path, timeout_s: float) -> dict[str, Any]:
+    """Reject an unusable frozen VLA runtime before any live observation.
+
+    This deliberately validates only interpreter/CUDA availability.  It does
+    not open DDS, load the model, or make an actuator publisher; the full
+    digest-bound model preflight remains the later candidate stage.
+    """
+    _runtime_configuration(runtime_package.resolve())
+    if not DEFAULT_PYTHON.is_file():
+        raise RuntimeError("the fixed UniFoLM-VLA Python runtime is unavailable")
+    completed = subprocess.run(
+        [
+            str(DEFAULT_PYTHON),
+            "-c",
+            (
+                "import torch\n"
+                "if not torch.cuda.is_available():\n"
+                "    raise RuntimeError('CUDA is unavailable to the fixed UniFoLM runtime')\n"
+                "print('cuda-ready')\n"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+        check=False,
+        env=_vla_environment(DEFAULT_PYTHON),
+    )
+    if completed.returncode != 0:
+        reason = completed.stderr.strip() or completed.stdout.strip() or "runtime probe failed"
+        raise RuntimeError(f"fixed UniFoLM-VLA runtime preflight failed: {reason}")
+    return {
+        "result": "unifolm_vla_runtime_ready",
+        "ready": True,
+        "runtime_kind": RUNTIME_KIND,
+        "command_publishers_created": 0,
+        "writes": 0,
+        "physical_rollout_attempts_consumed": 0,
+        "robot_runtime_consumed_s": 0,
+    }
+
+
 def _validate_plan(path: Path) -> dict[str, Any]:
     plan = _read_object(path, "UniFoLM-VLA action plan")
     checkpoint = plan.get("checkpoint")

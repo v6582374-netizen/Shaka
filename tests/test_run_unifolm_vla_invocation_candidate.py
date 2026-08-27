@@ -22,6 +22,39 @@ SPEC.loader.exec_module(MODULE)
 
 
 class UniFoLMInvocationCandidateTest(unittest.TestCase):
+    def test_runtime_preflight_checks_cuda_before_live_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime, _ = self.write_runtime(root)
+            python = root / "unifolm-python"
+            python.touch()
+            completed = SimpleNamespace(stdout="cuda-ready\n", stderr="", returncode=0)
+
+            with patch.object(MODULE, "DEFAULT_PYTHON", python), patch.object(
+                MODULE, "_vla_environment", return_value={"LD_LIBRARY_PATH": "/runtime/cuda"}
+            ), patch.object(MODULE.subprocess, "run", return_value=completed) as run:
+                result = MODULE.preflight_runtime(runtime, 5.0)
+
+        self.assertEqual(result["result"], "unifolm_vla_runtime_ready")
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["writes"], 0)
+        self.assertEqual(run.call_args.kwargs["env"], {"LD_LIBRARY_PATH": "/runtime/cuda"})
+        self.assertIn("torch.cuda.is_available", run.call_args.args[0][-1])
+
+    def test_runtime_preflight_rejects_cuda_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime, _ = self.write_runtime(root)
+            python = root / "unifolm-python"
+            python.touch()
+            completed = SimpleNamespace(stdout="", stderr="CUDA unavailable", returncode=1)
+
+            with patch.object(MODULE, "DEFAULT_PYTHON", python), patch.object(
+                MODULE, "_vla_environment", return_value={}
+            ), patch.object(MODULE.subprocess, "run", return_value=completed):
+                with self.assertRaisesRegex(RuntimeError, "CUDA unavailable"):
+                    MODULE.preflight_runtime(runtime, 5.0)
+
     def test_vla_environment_prefers_the_model_runtime_cuda_libraries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1222,6 +1222,24 @@ def run(manifest_path: Path, *, connected_g1: bool = False) -> dict[str, Any]:
             raise RuntimeError("readiness adapter did not establish readiness")
         _complete_stage(paths, progress, "readiness_confirmed")
 
+        if connected_g1:
+            runtime_preflight = _run_adapter(
+                adapter_path,
+                "runtime-preflight",
+                [
+                    "--runtime-package",
+                    str(paths.candidate_runtime),
+                    "--timeout-s",
+                    str(max(0.01, _remaining(deadline) - 0.25)),
+                ],
+                paths.artifacts / "candidate-runtime-preflight.json",
+                paths,
+                deadline,
+            )
+            if runtime_preflight.get("ready") is not True:
+                raise RuntimeError("candidate runtime preflight did not establish readiness")
+            _complete_stage(paths, progress, "candidate_runtime_ready")
+
         recorder = _start_recorder(manifest, paths, connected_g1)
         candidate_failure: Exception | None = None
         with paths.recorder_transcript.open("w", encoding="utf-8") as transcript:

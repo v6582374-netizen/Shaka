@@ -20,6 +20,7 @@ from _offline_invocation_adapter import (
 )
 from run_unifolm_vla_invocation_candidate import (
     RUNTIME_KIND as UNIFOLM_VLA_RUNTIME_KIND,
+    preflight_runtime as preflight_unifolm_vla_runtime,
     run_candidate as run_unifolm_vla_candidate,
 )
 from record_evaluator_episode import (
@@ -303,6 +304,21 @@ def candidate(args: argparse.Namespace) -> dict[str, Any]:
     return offline_candidate(args)
 
 
+def runtime_preflight(args: argparse.Namespace) -> dict[str, Any]:
+    """Verify the candidate runtime before beginning a live capture."""
+    package = json.loads(args.runtime_package.read_text(encoding="utf-8"))
+    runtime = package.get("runtime")
+    if isinstance(runtime, dict) and runtime.get("kind") == UNIFOLM_VLA_RUNTIME_KIND:
+        return preflight_unifolm_vla_runtime(args.runtime_package, args.timeout_s)
+    return _base(
+        result="candidate_runtime_ready",
+        ready=True,
+        runtime_kind=runtime.get("kind") if isinstance(runtime, dict) else "generic",
+        physical_rollout_attempts_consumed=0,
+        robot_runtime_consumed_s=0,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="adapter", required=True)
@@ -331,6 +347,10 @@ def parse_args() -> argparse.Namespace:
     candidate_parser.add_argument("--control-contract", type=Path, required=True)
     candidate_parser.add_argument("--timeout-s", type=float, required=True)
 
+    runtime_preflight_parser = subparsers.add_parser("runtime-preflight")
+    runtime_preflight_parser.add_argument("--runtime-package", type=Path, required=True)
+    runtime_preflight_parser.add_argument("--timeout-s", type=float, required=True)
+
     release_parser = subparsers.add_parser("release")
     release_parser.add_argument("--controller-trace", type=Path)
     release_parser.add_argument("--controller-stdout", type=Path)
@@ -352,6 +372,7 @@ def main() -> int:
     args = parse_args()
     functions = {
         "readiness": readiness,
+        "runtime-preflight": runtime_preflight,
         "candidate": candidate,
         "release": release,
         "evaluation": evaluation,
