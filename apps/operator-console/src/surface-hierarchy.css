@@ -1,0 +1,525 @@
+/*
+ * Surface hierarchy system — the Ma rhythm is now the formal UI.
+ *
+ * This remains isolated in a dedicated stylesheet so the finalized surface hierarchy stays
+ * easy to audit. The values follow the Skills Manager's dark
+ * "void black + graphite" relationship: the background carries most of the page and
+ * panels are only a quiet elevation cue.
+ */
+
+.ui-surface-hierarchy {
+  min-width: 0;
+  min-height: 100%;
+
+  /* Light mode: warm paper with a nearly-flat panel. */
+  --paper: #fafaf8;
+  --panel: #fdfdfb;
+  --ink: #1a1a1a;
+  --muted: #6a6b6c;
+  --faint: #969797;
+  --line: #e5e5e1;
+  --line-strong: #d2d2cd;
+  --accent: #2563eb;
+  --accent-soft: #edf2ff;
+  --ok: #258451;
+  --ok-soft: #edf7f0;
+  --ok-line: #cfe8d8;
+  --ok-dot: #3f9c5a;
+  --warn-ink: #a16207;
+  --warn-soft: #fff8df;
+  --danger: #c2413a;
+  --danger-soft: #fcebea;
+  --teal-ink: #0f766e;
+  --teal-line: #cfe9e5;
+  --teal-soft: #edf9f7;
+  --solid: #eeeeeb;
+  --on-solid: #252525;
+  --glass: rgba(250, 250, 248, 0.84);
+  --glass-strong: rgba(253, 253, 251, 0.94);
+  --glass-soft: rgba(250, 250, 248, 0.72);
+  --scrim: rgba(16, 16, 14, 0.3);
+  --check-a: #f0f0ed;
+  --check-b: #fafaf8;
+
+  /* Keep the embedded Skills Manager on the same surface contract. */
+  --openworker-paper: var(--paper);
+  --openworker-panel: var(--panel);
+  --openworker-ink: var(--ink);
+  --openworker-muted: var(--muted);
+  --openworker-faint: var(--faint);
+  --openworker-line: var(--line);
+  --openworker-line-strong: var(--line-strong);
+  --openworker-accent: var(--accent);
+  --openworker-accent-soft: var(--accent-soft);
+  --openworker-accent-foreground: #fff;
+  --openworker-ok: var(--ok);
+  --openworker-ok-soft: var(--ok-soft);
+  --openworker-ok-line: var(--ok-line);
+  --openworker-warn-ink: var(--warn-ink);
+  --openworker-warn-soft: var(--warn-soft);
+  --openworker-danger: var(--danger);
+  --openworker-danger-soft: var(--danger-soft);
+  --openworker-glass: var(--glass);
+  --openworker-glass-strong: var(--glass-strong);
+  --openworker-glass-soft: var(--glass-soft);
+}
+
+html[data-theme="dark"] .ui-surface-hierarchy {
+  /* Skills Manager reference: #040506 background / #07080a card / #111214 secondary. */
+  --paper: #040506;
+  --panel: #07080a;
+  --ink: #f4f4f5;
+  --muted: #9c9c9d;
+  --faint: #6d6e72;
+  --line: #1b1c1f;
+  --line-strong: #2b2d31;
+  --accent: #76a7ff;
+  --accent-soft: #122442;
+  --ok: #4ade80;
+  --ok-soft: #0d291c;
+  --ok-line: #1c4b31;
+  --ok-dot: #4ade80;
+  --warn-ink: #eab308;
+  --warn-soft: #332b08;
+  --danger: #ff7770;
+  --danger-soft: #3d2020;
+  --teal-ink: #46c0b2;
+  --teal-line: #1f4a45;
+  --teal-soft: #102c2a;
+  --solid: #111214;
+  --on-solid: #f4f4f5;
+  --glass: rgba(7, 8, 10, 0.82);
+  --glass-strong: rgba(7, 8, 10, 0.94);
+  --glass-soft: rgba(4, 5, 6, 0.72);
+  --scrim: rgba(0, 0, 0, 0.58);
+  --check-a: #111214;
+  --check-b: #07080a;
+}
+
+/* Large structural regions should read as one field, not a stack of gray slabs. */
+.ui-surface-hierarchy .app,
+.ui-surface-hierarchy .main,
+.ui-surface-hierarchy .main-scroll,
+.ui-surface-hierarchy .page-subnav,
+.ui-surface-hierarchy [data-testid="discovery-view"] {
+  background-color: var(--paper);
+}
+
+.ui-surface-hierarchy .sidebar {
+  background-color: var(--panel);
+}
+
+.ui-surface-hierarchy .main-topbar {
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy .right-rail {
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+/* Remove the “card pile” effect from structural frames while keeping borders for focus and
+   semantic states. Floating menus/dialogs retain their own shadow in the normal stylesheet. */
+.ui-surface-hierarchy .page-frame,
+.ui-surface-hierarchy .discovery-page-frame {
+  background: transparent;
+}
+
+/* A panel is only a one-step lift in this system. This also covers the Tailwind surfaces used
+   by Settings, Connectors, Inbox, Automations, Audit, Persona, and Discovery. */
+.ui-surface-hierarchy .bg-panel {
+  background-color: var(--panel);
+}
+
+.ui-surface-hierarchy .bg-paper {
+  background-color: var(--paper);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ui-surface-hierarchy .main-topbar,
+  .ui-surface-hierarchy .right-rail {
+    background: var(--paper);
+    backdrop-filter: none;
+  }
+}
+
+/* Formal pass: keep the refined middle-depth palette while using a horizontal, table-like rhythm. */
+.ui-surface-hierarchy--ma {
+  --paper: #f4f5f3;
+  --panel: #ffffff;
+  --ma-wash: #eceeeb;
+  --ma-structure: #e7e9e6;
+  --ma-structure-strong: #dde1dc;
+  --ma-structure-ink: #1a1d20;
+  --ma-structure-muted: #697176;
+  --ma-content: #f8f9f7;
+  --ink: #1a1d20;
+  --muted: #697176;
+  --faint: #8b9296;
+  --line: #dedfdd;
+  --line-strong: #c9cbc8;
+  --accent: #628de5;
+  --accent-soft: #e8eefb;
+  --ok: #2f9360;
+  --ok-soft: #e7f4ec;
+  --ok-line: #c8e2d0;
+  --warn-ink: #9a6f1d;
+  --warn-soft: #f5edd4;
+  --danger: #bb4b45;
+  --danger-soft: #f8e8e6;
+  --solid: #e3e6e2;
+  --on-solid: #25292c;
+  --glass: rgba(244, 245, 243, 0.86);
+  --glass-strong: rgba(255, 255, 255, 0.95);
+  --glass-soft: rgba(244, 245, 243, 0.78);
+  --surface-structure: var(--ma-wash);
+}
+
+html[data-theme="dark"] .ui-surface-hierarchy--ma {
+  --paper: #0e1013;
+  --panel: #171a1f;
+  --ma-wash: #111419;
+  --ma-structure: #171a1f;
+  --ma-structure-strong: #20252c;
+  --ma-structure-ink: #eef0f3;
+  --ma-structure-muted: #a5abb3;
+  --ma-content: #14171c;
+  --ink: #eef0f3;
+  --muted: #a5abb3;
+  --faint: #737a84;
+  --line: #292e36;
+  --line-strong: #3a424d;
+  --accent: #82aeff;
+  --accent-soft: #192b49;
+  --ok: #69d392;
+  --ok-soft: #102b1d;
+  --ok-line: #245338;
+  --warn-ink: #e1bb64;
+  --warn-soft: #342b0b;
+  --danger: #ff8980;
+  --danger-soft: #402322;
+  --solid: #22272e;
+  --on-solid: #eef0f3;
+  --glass: rgba(14, 16, 19, 0.88);
+  --glass-strong: rgba(23, 26, 31, 0.95);
+  --glass-soft: rgba(14, 16, 19, 0.78);
+  --surface-structure: var(--ma-wash);
+}
+
+.ui-surface-hierarchy--ma .app,
+.ui-surface-hierarchy--ma .main,
+.ui-surface-hierarchy--ma .main-scroll,
+.ui-surface-hierarchy--ma .page-subnav,
+.ui-surface-hierarchy--ma [data-testid="discovery-view"] {
+  background: var(--paper);
+}
+
+.ui-surface-hierarchy--ma .sidebar {
+  background: var(--ma-wash);
+  border-right-color: var(--line);
+}
+
+.ui-surface-hierarchy--ma .main-topbar {
+  background: color-mix(in srgb, var(--paper) 84%, var(--ma-wash));
+  border-bottom-color: var(--line);
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy--ma .right-rail {
+  background: color-mix(in srgb, var(--paper) 82%, var(--ma-wash));
+  border-left-color: var(--line);
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy--ma .page-frame,
+.ui-surface-hierarchy--ma .discovery-page-frame {
+  background: transparent;
+}
+
+/* Horizontal rules only: the stage reads like a dense three-line table instead of four cards. */
+.ui-surface-hierarchy--ma .discovery-stage-bar {
+  gap: 0;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-surface-hierarchy--ma .discovery-stage {
+  min-height: 67px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-surface-hierarchy--ma .discovery-stage.is-active {
+  --ink: var(--ma-structure-ink);
+  --muted: var(--ma-structure-muted);
+  --faint: color-mix(in srgb, var(--ma-structure-muted) 72%, transparent);
+  color: var(--ma-structure-ink);
+  background: var(--ma-structure);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* Remove the outer vertical card frames; the original component contents remain intact. */
+.ui-surface-hierarchy--ma .discovery-gather-section,
+.ui-surface-hierarchy--ma .discovery-review-section,
+.ui-surface-hierarchy--ma .discovery-run-section {
+  overflow: visible !important;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Gather context is the one filled structural row. Status, count, and save stay in this row. */
+.ui-surface-hierarchy--ma .discovery-gather-header {
+  min-height: 66px;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--ma-structure);
+  --ink: var(--ma-structure-ink);
+  --muted: var(--ma-structure-muted);
+  --faint: color-mix(in srgb, var(--ma-structure-muted) 72%, transparent);
+}
+
+.ui-surface-hierarchy--ma .discovery-gather-header-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.ui-surface-hierarchy--ma .discovery-gather-inline-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  color: var(--ma-structure-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ui-surface-hierarchy--ma .discovery-gather-inline-status {
+  color: var(--ma-structure-ink);
+  font-weight: 650;
+}
+
+.ui-surface-hierarchy--ma .discovery-gather-inline-count {
+  color: var(--ma-structure-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-surface-hierarchy--ma .discovery-gather-inline-meta .discovery-button,
+.ui-surface-hierarchy--ma .discovery-gather-add {
+  color: var(--ma-structure-ink);
+  border-color: var(--line-strong);
+  background: var(--ma-structure-strong);
+}
+
+.ui-surface-hierarchy--ma .discovery-gather-inline-meta .discovery-button:hover:not(:disabled),
+.ui-surface-hierarchy--ma .discovery-gather-add:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ma-structure-strong) 88%, var(--paper));
+}
+
+@media (max-width: 900px) {
+  .ui-surface-hierarchy--ma .discovery-gather-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ui-surface-hierarchy--ma .discovery-gather-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 620px) {
+  .ui-surface-hierarchy--ma .discovery-gather-header-actions,
+  .ui-surface-hierarchy--ma .discovery-gather-inline-meta {
+    flex-wrap: wrap;
+  }
+
+  .ui-surface-hierarchy--ma .discovery-gather-inline-meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ui-surface-hierarchy--ma .discovery-gather-add {
+    margin-left: auto;
+  }
+}
+
+/* MA follow-up: the remaining Preparation sections share the same ruled rhythm. */
+.ui-surface-hierarchy--ma .discovery-review-section .discovery-review-header,
+.ui-surface-hierarchy--ma .discovery-run-section .discovery-run-header {
+  border-top: 1px solid var(--line-strong);
+  border-bottom-color: var(--line);
+  background: transparent;
+}
+
+/* Current Launch / History detail: Runtime → checkpoints → artifacts. The vertical card edges
+   disappear, but local fills remain so the page still has a readable depth order. */
+.ui-surface-hierarchy--ma .discovery-stage-strip-layout-ma {
+  gap: 0;
+}
+
+.ui-surface-hierarchy--ma .discovery-stage-strip-layout-ma > .discovery-beacon-hero {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy--ma .discovery-stage-strip-layout-ma > .discovery-launch-notice {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--ma-content);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-runtime-row {
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+  background: var(--ma-content);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-runtime-row .discovery-runtime-desk,
+.ui-surface-hierarchy--ma .discovery-ma-runtime-row .discovery-runtime-pulse-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-runtime-row .discovery-runtime-events {
+  background: var(--ma-content);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-checkpoint-row .discovery-checkpoint-strip {
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-checkpoint-row .discovery-checkpoint-strip-head {
+  min-height: 50px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom-color: var(--line);
+  border-radius: 0;
+  background: var(--ma-structure);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-checkpoint-row .discovery-checkpoint-grid {
+  gap: 0;
+  padding: 0;
+  background: var(--line);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-checkpoint-row .discovery-checkpoint-slot {
+  min-height: 177px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--ma-content);
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-checkpoint-row .discovery-checkpoint-slot.is-selected {
+  background: var(--ma-structure);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-checkpoint-row .discovery-checkpoint-slot:hover {
+  background: var(--ma-structure);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-artifact-row {
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-artifact-row .rail-section {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--ma-content);
+}
+
+.ui-surface-hierarchy--ma .discovery-ma-artifact-row .rail-section-head {
+  background: var(--ma-structure);
+}
+
+/* History rows keep the information density of a table without becoming a grid of boxed cards. */
+.ui-surface-hierarchy--ma .discovery-history-selected-surface {
+  margin-top: 24px;
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated {
+  width: 100%;
+  padding-top: 0;
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated-frame-head {
+  min-height: 44px;
+  padding: 0 2px 10px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom-color: var(--line);
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated-list {
+  padding: 0;
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated-row {
+  border-left: 0;
+  border-right: 0;
+  border-bottom-color: var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated-row:last-child {
+  border-bottom-color: var(--line-strong);
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated-row:hover,
+.ui-surface-hierarchy--ma .discovery-history-consolidated-row.is-selected {
+  background: var(--ma-content);
+  box-shadow: none;
+  transform: none;
+}
+
+.ui-surface-hierarchy--ma .discovery-history-consolidated-row:active {
+  transform: none;
+}
+
+/* Keep the raw stream on the page field in the MA study instead of introducing a separate dark
+   terminal slab. */
+.ui-surface-hierarchy--ma .discovery-raw-console {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.ui-surface-hierarchy--ma .discovery-raw-console-head {
+  color: var(--muted);
+}
+
+.ui-surface-hierarchy--ma .discovery-raw-console pre {
+  color: var(--ink);
+}

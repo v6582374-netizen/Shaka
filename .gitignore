@@ -1,0 +1,10 @@
+# Local runtimes and generated analysis state
+.venv/
+.codebase-memory/
+__pycache__/
+*.py[cod]
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.coverage

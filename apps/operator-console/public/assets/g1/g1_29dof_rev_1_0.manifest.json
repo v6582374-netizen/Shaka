@@ -1,0 +1,12 @@
+{
+  "model": "Unitree G1 29DoF rev 1.0",
+  "source_repository": "https://github.com/unitreerobotics/unitree_rl_gym",
+  "source_revision": "276801e46c5d433564f24658bac64f254b7d2d4b",
+  "source_urdf": "resources/robots/g1_description/g1_29dof_rev_1_0.urdf",
+  "license": "BSD-3-Clause",
+  "excluded_links": [
+    "logo_link"
+  ],
+  "animation": "none; neutral static exterior only",
+  "generator": "scripts/build_g1_hologram_asset.py"
+}

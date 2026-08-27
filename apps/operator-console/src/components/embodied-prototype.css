@@ -1,0 +1,693 @@
+/* PROTOTYPE ONLY — Embodied Execution reliability surface, three variants.
+ * Delete once the layout decision is captured (see EmbodiedPrototype.tsx header).
+ * Tokens come from styles.css (:root / [data-theme=dark]) so all three variants sit at the
+ * app's real density and follow the live theme. Motion is spring-driven in JS; CSS transitions
+ * are used only for non-interruptible affordances (hover, press). */
+
+.eb {
+  --lineStrong: var(--line-strong);
+  --accentSoft: var(--accent-soft);
+  --okSoft: var(--ok-soft);
+  --okLine: var(--ok-line);
+  --warnInk: var(--warn-ink);
+  --warnSoft: var(--warn-soft);
+  --dangerSoft: var(--danger-soft);
+}
+
+.eb {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ chrome */
+
+.eb-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 4;
+}
+.eb-top h1 {
+  margin: 0;
+  font-family: var(--editorial-serif);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+}
+.eb-top .eb-scope {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  letter-spacing: 0.01em;
+}
+.eb-top .eb-scope b {
+  color: var(--muted);
+  font-weight: 500;
+}
+.eb-spacer { flex: 1 1 auto; }
+
+.eb-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 18px;
+  background: var(--warnSoft);
+  color: var(--warnInk);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+.eb-ribbon b { font-weight: 600; letter-spacing: 0.04em; font-size: 10px; }
+
+/* ------------------------------------------------------------------ generic atoms */
+
+.eb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.eb-pill--ok { background: var(--okSoft); border-color: var(--okLine); color: var(--ok); }
+.eb-pill--warn { background: var(--warnSoft); border-color: transparent; color: var(--warnInk); }
+.eb-pill--stop { background: var(--dangerSoft); border-color: transparent; color: var(--danger); }
+.eb-pill--live { background: var(--accentSoft); border-color: transparent; color: var(--accent); }
+
+.eb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+.eb-dot--pulse { animation: eb-pulse 1.6s ease-in-out infinite; }
+@keyframes eb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.eb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 100ms ease-out, background 120ms ease-out;
+}
+.eb-btn:hover { background: var(--paper); }
+.eb-btn:active { transform: scale(0.97); }
+.eb-btn--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+.eb-btn--primary:hover { background: var(--accent); filter: brightness(1.06); }
+
+.eb-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.eb-card > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.eb-card > header .eb-spacer { flex: 1 1 auto; }
+
+.eb-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.eb-mono { font-family: var(--mono); font-size: 11px; }
+.eb-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ bars */
+
+.eb-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.eb-bar > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transform-origin: left center;
+}
+.eb-bar--done > i { background: var(--ok); }
+.eb-bar--stop > i { background: var(--danger); }
+.eb-bar--thin { height: 3px; }
+
+/* The measured-vs-budget bar: a budget marker the fill can visibly cross. */
+.eb-meter {
+  position: relative;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.eb-meter > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: 5px 0 0 5px;
+  background: var(--accentSoft);
+  transform-origin: left center;
+}
+.eb-meter.is-over > i { background: var(--dangerSoft); }
+.eb-meter > .eb-meter-budget {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--warnInk);
+  opacity: 0.75;
+}
+.eb-meter > .eb-meter-budget::after {
+  content: "预算";
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  transform: translateY(-50%);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--warnInk);
+  white-space: nowrap;
+}
+.eb-meter > span {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ ladder (shared) */
+
+.eb-ladder { display: grid; gap: 8px; }
+.eb-rung {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.eb-rung--live { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accentSoft); }
+.eb-rung--earned { background: var(--okSoft); border-color: var(--okLine); }
+.eb-rung--closed { opacity: 0.62; }
+.eb-rung--stop { background: var(--dangerSoft); border-color: transparent; }
+.eb-rung .eb-step {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+.eb-rung--earned .eb-step { background: var(--ok); border-color: transparent; color: #fff; }
+.eb-rung--live .eb-step { background: var(--accent); border-color: transparent; color: #fff; }
+.eb-rung strong { display: block; font-size: 12.5px; font-weight: 600; }
+.eb-rung small { display: block; color: var(--muted); font-size: 11px; }
+.eb-rung .eb-why { color: var(--warnInk); font-size: 11px; }
+
+/* ------------------------------------------------------------------ joint readout */
+
+.eb-joints { display: grid; gap: 5px; }
+.eb-joint {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.eb-joint > span:first-child { color: var(--muted); }
+.eb-joint-track {
+  position: relative;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+/* Commanded setpoint (hollow) and measured position (solid). The visible gap IS the servo lag. */
+.eb-joint-track > .eb-set,
+.eb-joint-track > .eb-meas {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 999px;
+}
+.eb-joint-track > .eb-set { border: 1.5px solid var(--accent); background: transparent; }
+.eb-joint-track > .eb-meas { background: var(--ink); }
+.eb-joint-track > .eb-zero {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+/* ------------------------------------------------------------------ log */
+
+.eb-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+.eb-log li {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--muted);
+}
+.eb-log li > b {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  padding-top: 1px;
+}
+.eb-log li[data-kind="measure"] > b { color: var(--accent); }
+.eb-log li[data-kind="attempt"] > b { color: var(--ok); }
+.eb-log li[data-kind="evidence"] > b { color: var(--teal-ink); }
+.eb-log li[data-kind="refuse"] > b { color: var(--danger); }
+.eb-log li[data-kind="abort"] > b { color: var(--danger); }
+.eb-log li[data-kind="verdict"] > b { color: var(--ink); }
+.eb-log li[data-kind="refuse"],
+.eb-log li[data-kind="abort"] { color: var(--ink); }
+
+/* ------------------------------------------------------------------ blocking list */
+
+.eb-blocking { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.eb-blocking li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--dangerSoft);
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.eb-blocking li > span:first-child { color: var(--danger); }
+.eb-blocking li code {
+  display: block;
+  margin-top: 3px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.eb-unrep { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.eb-unrep li {
+  display: grid;
+  gap: 1px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.eb-unrep li > span:first-child {
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ attempt grid */
+
+.eb-attempts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+  gap: 4px;
+}
+.eb-attempt {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--faint);
+}
+.eb-attempt--ok { background: var(--okSoft); border-color: var(--okLine); color: var(--ok); }
+.eb-attempt--abort { background: var(--dangerSoft); border-color: transparent; color: var(--danger); }
+.eb-attempt--never { border-style: dashed; opacity: 0.5; }
+.eb-attempt--live { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accentSoft); }
+
+/* ------------------------------------------------------------------ camera slots */
+
+.eb-cams { display: grid; gap: 6px; }
+.eb-cam {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 11px;
+}
+.eb-cam .eb-mono { color: var(--faint); }
+
+/* ------------------------------------------------------------------ scenario picker */
+
+.eb-scenarios { display: grid; gap: 6px; }
+.eb-scenario {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 100ms ease-out, border-color 120ms ease-out;
+}
+.eb-scenario:hover { border-color: var(--line-strong); }
+.eb-scenario:active { transform: scale(0.99); }
+.eb-scenario[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accentSoft); }
+.eb-scenario strong { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.eb-scenario small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.eb-scenario em { color: var(--faint); font-size: 10.5px; font-style: normal; }
+
+/* ------------------------------------------------------------------ VARIANT A: 三栏工作台 */
+
+.eb-a {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr) 320px;
+  gap: 12px;
+  padding: 12px 14px 62px;
+  min-height: 0;
+  overflow: hidden;
+}
+.eb-a > section { display: grid; gap: 12px; align-content: start; min-height: 0; overflow-y: auto; }
+.eb-a-center { grid-template-rows: auto auto minmax(0, 1fr); }
+.eb-a-center > .eb-card:last-child { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.eb-a-center > .eb-card:last-child > div { min-height: 0; overflow: hidden; padding: 10px 12px; display: grid; }
+.eb-pad { padding: 11px 12px; display: grid; gap: 10px; }
+.eb-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.eb-stat { display: grid; gap: 2px; }
+.eb-stat > span { color: var(--faint); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.eb-stat > b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.eb-stat--muted > b { color: var(--faint); }
+
+/* The remount wrapper must not become a layout box: the variant roots stay grid items of .eb. */
+.eb-stage { display: contents; }
+
+/* ------------------------------------------------------------------ VARIANT B: 单问题纵向叙事 */
+
+.eb-b {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 0 84px;
+}
+.eb-b-inner { width: min(760px, calc(100% - 48px)); margin: 0 auto; display: grid; gap: 20px; }
+.eb-b-hero { display: grid; gap: 10px; }
+.eb-b-hero h2 {
+  margin: 0;
+  font-family: var(--editorial-serif);
+  font-size: clamp(22px, 3.4vw, 32px);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+.eb-b-hero p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; max-width: 62ch; }
+.eb-b-step { display: grid; gap: 10px; }
+.eb-b-step > h3 {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+.eb-b-step > h3 > i {
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 11px;
+  color: var(--faint);
+}
+.eb-b-step > p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; max-width: 66ch; }
+.eb-b-verdict {
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  display: grid;
+  gap: 12px;
+}
+.eb-b-verdict h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.eb-b-verdict.is-stop { background: var(--dangerSoft); border-color: transparent; }
+.eb-b-verdict.is-ok { background: var(--okSoft); border-color: var(--okLine); }
+
+/* ------------------------------------------------------------------ VARIANT C: 证据台账 */
+
+.eb-c {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 14px 62px;
+  gap: 12px;
+}
+.eb-c-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.eb-c-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; min-height: 0; }
+.eb-c-body > .eb-card { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.eb-c-body > .eb-card > div { min-height: 0; overflow-y: auto; }
+.eb-c-side { display: grid; gap: 12px; align-content: start; min-height: 0; overflow-y: auto; }
+
+.eb-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.eb-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--glass-strong);
+  backdrop-filter: blur(12px);
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.eb-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+.eb-table td.eb-td-mono { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.eb-table tr[data-outcome="aborted"] { background: var(--dangerSoft); }
+.eb-table tr[data-live="true"] { background: var(--accentSoft); }
+.eb-table caption {
+  caption-side: bottom;
+  padding: 9px 10px;
+  color: var(--faint);
+  font-size: 11px;
+  text-align: left;
+}
+
+/* ------------------------------------------------------------------ picker (harness chrome)
+   Verbatim from the prototype skill's PICKER.md. Deliberately NOT themed with this
+   surface's tokens: it must always read as harness chrome, never as part of the design
+   being judged. Do not restyle. */
+
+.proto-picker {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(10, 10, 10, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 8px 24px rgba(0, 0, 0, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.proto-picker-highlight {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  will-change: transform;
+}
+
+/* The slide is enabled only after first paint (data-ready), so load doesn't animate. */
+.proto-picker[data-ready] .proto-picker-highlight {
+  transition:
+    transform 250ms cubic-bezier(0.23, 1, 0.32, 1),
+    width 250ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-picker[data-ready] .proto-picker-highlight { transition: none; }
+}
+
+.proto-picker-item {
+  position: relative; /* sits above the highlight */
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms ease-out;
+}
+
+.proto-picker-item:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.proto-picker-item:active {
+  transform: scale(0.97);
+}
+
+.proto-picker-item:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}
+
+.proto-picker-item[data-active] {
+  color: #fff;
+}
+
+.proto-picker-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.proto-picker-replay {
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.proto-picker[data-position="top"] {
+  bottom: auto;
+  top: 24px;
+}
+
+/* ------------------------------------------------------------------ reduced motion / transparency */
+
+@media (prefers-reduced-motion: reduce) {
+  .eb-dot--pulse { animation: none; }
+  .eb *,
+  .eb *::before,
+  .eb *::after { transition-duration: 0.01ms !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .eb-top,
+  .eb-table th { background: var(--panel); backdrop-filter: none; }
+}

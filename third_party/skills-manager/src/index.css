@@ -1,0 +1,1177 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource/geist-mono/300.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
+
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* Radius scale (Raycast: 6 / 8 / 11 / 16) */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 11px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-4xl: 28px;
+
+  /* Color tokens → raw variables defined in :root / .dark */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Glass surface colors */
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+
+  /* Font families */
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-mono: 'GeistMono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  /* Light theme — warm paper neutrals (Raycast light variant) */
+  --radius: 11px;
+
+  --background: #fbfbfa;
+  --foreground: #1a1a1a;
+  --card: #ffffff;
+  --card-foreground: #1a1a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1a;
+  --primary: #1a1a1a;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f2;
+  --secondary-foreground: #1a1a1a;
+  --muted: #f4f4f2;
+  --muted-foreground: #6a6b6c;
+  --accent: #f4f4f2;
+  --accent-foreground: #1a1a1a;
+  --destructive: #d32f2f;
+  --border: #e4e4e0;
+  --input: #e4e4e0;
+  --ring: #363739;
+  --chart-1: #ff6363;
+  --chart-2: #59d499;
+  --chart-3: #56c2ff;
+  --chart-4: #a371f7;
+  --chart-5: #d29922;
+  --sidebar: #f4f4f2;
+  --sidebar-foreground: #1a1a1a;
+  --sidebar-primary: #1a1a1a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(0, 0, 0, 0.05);
+  --sidebar-accent-foreground: #1a1a1a;
+  --sidebar-border: #e4e4e0;
+  --sidebar-ring: #363739;
+
+  /* Raycast brand + signal colors */
+  --ember: #ff6363;
+  --ember-dark: #452324;
+  --mint: #59d499;
+  --sky: #56c2ff;
+  --ash: #e6e6e6;
+
+  /* Semantic colors */
+  --color-error: #d32f2f;
+  --color-error-bg: #fef2f2;
+  --color-error-border: #fecaca;
+
+  --color-success: #16a34a;
+  --color-success-bg: #dcfce7;
+  --color-success-border: #bbf7d0;
+
+  --color-warning: #ca8a04;
+  --color-warning-bg: #fefce8;
+  --color-warning-border: #fef08a;
+
+  --color-info: #2563eb;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bfdbfe;
+
+  /* Shadows — monochrome only (no color tints) */
+  --shadow-subtle: rgba(0, 0, 0, 0.04) 0px 1px 2px 0px, rgba(0, 0, 0, 0.06) 0px 1px 0px 0px inset;
+  --shadow-sm: rgba(0, 0, 0, 0.08) 0px 2px 4px 0px;
+  --shadow-lg: rgba(0, 0, 0, 0.1) 0px 4px 16px 0px;
+  --shadow-xl: rgba(0, 0, 0, 0.12) 0px 8px 40px 8px, rgba(0, 0, 0, 0.08) 0px 0px 0px 0.5px;
+  --shadow-ring: rgba(0, 0, 0, 0.15) 0px 0px 0px 1px;
+  --shadow-highlight: rgba(0, 0, 0, 0.04) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.35) 0px 0px 0px 1px, rgba(0, 0, 0, 0.06) 0px -1px 0px 0px inset;
+
+  /* Primary tint scale — used for selected/hover fills derived from primary.
+     Resolves the previously-undefined var(--primary-tint) referenced across pages. */
+  --primary-tint: rgba(26, 26, 26, 0.08);
+  --primary-tint-border: rgba(26, 26, 26, 0.35);
+
+  /* Surface hover — raised-fill hover state for cards/rows. */
+  --surface-hover: rgba(0, 0, 0, 0.04);
+
+  /* ===== Glass / backlit panel tokens (Raycast aesthetic) =====
+     Light mode: frosted white glass with subtle shadow and top highlight. */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.86);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-border-strong: rgba(0, 0, 0, 0.14);
+  --glass-highlight: rgba(255, 255, 255, 0.9) 0px 1px 0px 0px inset;
+  --glass-shadow:
+    rgba(0, 0, 0, 0.08) 0px 2px 8px 0px,
+    rgba(0, 0, 0, 0.04) 0px 16px 40px 0px,
+    rgba(0, 0, 0, 0.06) 0px 0px 0px 1px;
+  --glass-backdrop: blur(24px) saturate(140%);
+  --glow-ember: rgba(255, 99, 99, 0.10);
+  --glow-ash: rgba(0, 0, 0, 0.04);
+}
+
+.dark {
+  /* Dark theme — Raycast void black + graphite stack */
+  --background: #040506;
+  --foreground: #ffffff;
+  --card: #07080a;
+  --card-foreground: #ffffff;
+  --popover: #07080a;
+  --popover-foreground: #ffffff;
+  --primary: #e6e6e6;
+  --primary-foreground: #2f3031;
+  --secondary: #111214;
+  --secondary-foreground: #ffffff;
+  --muted: #111214;
+  --muted-foreground: #9c9c9d;
+  --accent: #111214;
+  --accent-foreground: #ffffff;
+  --destructive: #ff6363;
+  --border: #363739;
+  --input: #363739;
+  --ring: #454647;
+  --chart-1: #ff6363;
+  --chart-2: #59d499;
+  --chart-3: #56c2ff;
+  --chart-4: #a371f7;
+  --chart-5: #d29922;
+  --sidebar: #07080a;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #e6e6e6;
+  --sidebar-primary-foreground: #2f3031;
+  --sidebar-accent: rgba(255, 255, 255, 0.06);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #363739;
+  --sidebar-ring: #454647;
+
+  /* Raycast brand + signal colors */
+  --ember: #ff6363;
+  --ember-dark: #452324;
+  --mint: #59d499;
+  --sky: #56c2ff;
+  --ash: #e6e6e6;
+
+  /* Semantic colors — dark mode overrides */
+  --color-error-bg: #452324;
+  --color-error-border: #7a2d2e;
+
+  --color-success-bg: #0f2e1f;
+  --color-success-border: #1f5135;
+
+  --color-warning-bg: #3a2f06;
+  --color-warning-border: #5c4810;
+
+  --color-info-bg: #0d213f;
+  --color-info-border: #1f3a66;
+
+  /* Semantic base colors — lift luminance for dark backgrounds */
+  --color-error: #f87171;
+  --color-success: #4ade80;
+  --color-warning: #eab308;
+  --color-info: #60a5fa;
+
+  /* Shadows — monochrome (black drops, white inset highlights) */
+  --shadow-subtle: rgba(255, 255, 255, 0.04) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.25) 0px 1px 2px 0px;
+  --shadow-sm: rgba(0, 0, 0, 0.25) 0px 4px 4px 0px;
+  --shadow-lg: rgba(0, 0, 0, 0.4) 0px 4px 20px 0px;
+  --shadow-xl: rgba(0, 0, 0, 0.4) 0px 4px 40px 8px, rgba(0, 0, 0, 0.8) 0px 0px 0px 0.5px, rgba(255, 255, 255, 0.3) 0px 0.5px 0px 0px inset;
+  --shadow-ring: rgba(255, 255, 255, 0.08) 0px 0px 0px 1px, rgba(0, 0, 0, 0.4) 0px 0px 0px 1px inset;
+  --shadow-highlight: rgba(255, 255, 255, 0.05) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.25) 0px 0px 0px 1px, rgba(0, 0, 0, 0.2) 0px -1px 0px 0px inset;
+
+  /* Primary tint scale — dark mode: near-white tints on black. */
+  --primary-tint: rgba(230, 230, 230, 0.08);
+  --primary-tint-border: rgba(230, 230, 230, 0.35);
+
+  /* Surface hover — dark mode: white-alpha lift. */
+  --surface-hover: rgba(255, 255, 255, 0.04);
+
+  /* ===== Glass / backlit panel tokens (Raycast aesthetic) =====
+     Dark mode: near-black translucent glass with luminous top edge. */
+  --glass-bg: rgba(12, 12, 14, 0.76);
+  --glass-bg-elevated: rgba(22, 22, 24, 0.86);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-strong: rgba(255, 255, 255, 0.14);
+  --glass-highlight:
+    rgba(255, 255, 255, 0.12) 0px 1px 0px 0px inset,
+    rgba(255, 99, 99, 0.06) 0px 2px 16px 0px inset;
+  --glass-shadow:
+    rgba(0, 0, 0, 0.45) 0px 4px 24px 0px,
+    rgba(255, 99, 99, 0.08) 0px 0px 80px 0px,
+    rgba(255, 255, 255, 0.06) 0px 0px 0px 1px;
+  --glass-backdrop: blur(28px) saturate(160%);
+  --glow-ember: rgba(255, 99, 99, 0.14);
+  --glow-ash: rgba(255, 255, 255, 0.03);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--app-font-family, var(--font-sans));
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "calt", "kern", "liga";
+  }
+  code, pre, kbd, .font-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "calt", "kern", "liga";
+  }
+  /* Visible focus ring for keyboard navigation. Uses --ring token so it
+     adapts to both themes. Only applies to keyboard focus, not mouse clicks. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+}
+
+/* Theme-aware scrollbar (replaces hardcoded black-alpha) */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes custom-caret-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.custom-caret {
+  animation: custom-caret-blink 1s step-end infinite;
+}
+
+.custom-caret-input::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+
+.custom-caret-input:focus::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+
+/* ===== Raycast motion system =====
+   Entrances use outQuint (cubic-bezier(0.23, 1, 0.32, 1)): fast attack, long settle.
+   Micro-interactions (color/opacity/shadow) default to 200ms ease.
+   Nothing exceeds 700ms. */
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes riskScanPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Page content entrance — applied to each page's main content wrapper. */
+.animate-page-enter {
+  animation: fadeInUp 280ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* Dropdown / popover entrance. */
+.animate-popover {
+  animation: scaleIn 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* Modal / dialog entrance. */
+.animate-modal {
+  animation: fadeInUp 240ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes marketplaceSkeletonShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.marketplace-skeleton-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--secondary) 0%,
+    var(--border) 50%,
+    var(--secondary) 100%
+  );
+  background-size: 200% 100%;
+  animation: marketplaceSkeletonShimmer 1.4s ease-in-out infinite;
+}
+
+/* ===== Responsive utilities for page layouts ===== */
+
+.page-main {
+  padding: 24px 32px;
+}
+
+@media (max-width: 1023px) {
+  .page-main {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 767px) {
+  .page-main {
+    padding: 16px;
+  }
+}
+
+.page-container {
+  margin: 0 auto;
+}
+
+.card-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Skills hierarchy view */
+.skills-view-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.skills-view-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+}
+
+.skills-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 76px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.skills-view-switch button:hover {
+  color: var(--foreground);
+}
+
+.skills-view-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.skills-view-switch button:disabled:hover {
+  color: var(--muted-foreground);
+}
+
+.skills-view-switch button.is-active:disabled:hover {
+  color: var(--foreground);
+}
+
+.skills-view-switch button:active,
+.skills-row-icon-button:active,
+.skills-selection-indicator:active {
+  transform: translateY(1px);
+}
+
+.skills-view-switch button.is-active {
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: var(--shadow-sm);
+}
+
+.skills-view-summary {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-grouped-list,
+.skills-list-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.skills-grouped-list {
+  gap: 24px;
+}
+
+.skills-list-section {
+  gap: 8px;
+}
+
+.skills-list-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.skills-list-section-heading span:last-child {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-groups-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skills-group-section,
+.skills-standalone-list {
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
+
+.skills-group-section.is-selected {
+  border-color: var(--primary-tint-border);
+  background: var(--primary-tint);
+}
+
+.skills-group-header {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.skills-group-summary {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skills-group-chevron,
+.skills-row-chevron {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  transition: transform 180ms ease, color 150ms ease;
+}
+
+.skills-group-chevron.is-expanded,
+.skills-row-chevron.is-expanded {
+  transform: rotate(90deg);
+  color: var(--foreground);
+}
+
+.skills-group-icon,
+.skills-list-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.skills-group-copy,
+.skills-list-row-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.skills-group-copy {
+  gap: 4px;
+}
+
+.skills-group-title-line,
+.skills-list-row-title-line,
+.skills-group-subline,
+.skills-list-row-tags {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.skills-group-title-line {
+  gap: 8px;
+}
+
+.skills-group-title,
+.skills-list-row-title {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-group-count,
+.skills-membership-label,
+.skills-scope-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+  padding: 0 6px;
+}
+
+.skills-scope-badge.is-project {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.skills-group-subline {
+  gap: 8px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.skills-group-subline > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skills-group-subline .is-warning {
+  color: var(--color-warning);
+}
+
+.skills-group-tool-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 6px;
+}
+
+.skills-group-tool-coverage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px 0 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-group-tool-coverage.is-full {
+  border-color: var(--primary-tint-border);
+  color: var(--foreground);
+  background: var(--primary-tint);
+}
+
+.skills-group-tool-coverage.is-partial {
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.skills-group-no-tools,
+.skills-group-more-tools {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-group-members {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--secondary) 38%, var(--background));
+}
+
+.skills-list-row-anchor + .skills-list-row-anchor {
+  border-top: 1px solid var(--border);
+}
+
+.skills-list-row-anchor {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 66px;
+}
+
+.skills-list-row {
+  position: relative;
+  padding: 0 12px;
+  background: var(--background);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.skills-list-row:hover {
+  background: var(--surface-hover);
+}
+
+.skills-list-row.is-group-member {
+  padding-left: 38px;
+  background: transparent;
+}
+
+.skills-list-row.is-selected {
+  background: var(--primary-tint);
+}
+
+.skills-list-row.is-highlighted {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.skills-list-row-main {
+  display: flex;
+  align-items: center;
+  min-height: 66px;
+  gap: 8px;
+}
+
+.skills-list-row-summary {
+  display: grid;
+  grid-template-columns: 32px minmax(120px, 1fr) minmax(110px, auto) 16px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  padding: 8px 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skills-list-row-copy {
+  gap: 3px;
+}
+
+.skills-list-row-title-line {
+  gap: 6px;
+}
+
+.skills-list-row-description {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-list-row-tags {
+  gap: 6px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.skills-list-row-tools,
+.skills-list-row-tool-icons {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.skills-list-row-tools {
+  justify-self: end;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.skills-list-row-tool-icons {
+  gap: 3px;
+}
+
+.skills-list-row-tool-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-list-row-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.skills-row-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.skills-row-icon-button:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.skills-selection-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--primary-foreground);
+  background: var(--background);
+  cursor: pointer;
+}
+
+.skills-selection-indicator[data-state="checked"] {
+  border-color: var(--foreground);
+  background: var(--foreground);
+}
+
+.skills-selection-indicator[data-state="mixed"] {
+  border-color: var(--primary-tint-border);
+  color: var(--foreground);
+  background: var(--primary-tint);
+}
+
+.skills-risk-button,
+.skills-file-progress {
+  height: 22px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.skills-risk-button {
+  padding: 0 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.skills-risk-button.risk-low {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.skills-risk-button.risk-medium {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.skills-risk-button.risk-high,
+.skills-risk-button.risk-critical {
+  color: var(--color-error);
+  background: var(--color-error-bg);
+}
+
+.skills-file-progress {
+  padding: 0 6px;
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-list-row-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(200px, 1fr) auto;
+  gap: 18px;
+  margin-left: 42px;
+  padding: 12px 0 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.skills-list-row-details > div {
+  min-width: 0;
+}
+
+.skills-detail-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.skills-list-row-details p,
+.skills-list-row-details code {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.skills-list-row-details code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+}
+
+.skills-detail-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.skills-group-empty-members {
+  padding: 16px 38px;
+  color: var(--color-warning);
+  font-size: 12px;
+}
+
+@media (max-width: 1599px) {
+  .card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1279px) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .skills-view-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .skills-view-switch {
+    align-self: flex-start;
+  }
+
+  .skills-view-summary {
+    padding-left: 2px;
+  }
+
+  .skills-group-header {
+    flex-wrap: wrap;
+    padding: 10px;
+  }
+
+  .skills-group-summary {
+    flex-basis: calc(100% - 42px);
+  }
+
+  .skills-group-tool-summary {
+    order: 3;
+    justify-content: flex-start;
+    width: 100%;
+    padding-left: 27px;
+  }
+
+  .skills-list-row,
+  .skills-list-row.is-group-member {
+    padding-right: 8px;
+  }
+
+  .skills-list-row.is-group-member {
+    padding-left: 24px;
+  }
+
+  .skills-list-row-summary {
+    grid-template-columns: 30px minmax(90px, 1fr) 14px;
+    gap: 8px;
+  }
+
+  .skills-list-row-tools,
+  .skills-list-row-tags,
+  .skills-file-progress,
+  .skills-risk-button {
+    display: none;
+  }
+
+  .skills-list-row-actions {
+    gap: 1px;
+  }
+
+  .skills-list-row-details {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-left: 38px;
+  }
+}
+
+.marketplace-main {
+  padding: 12px 20px;
+}
+
+@media (max-width: 1023px) {
+  .marketplace-main {
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .marketplace-main {
+    padding: 12px;
+  }
+}
+
+.marketplace-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1599px) {
+  .marketplace-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1279px) {
+  .marketplace-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .marketplace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.compact-grid {
+  display: grid;
+  gap: 14px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 639px) {
+  .compact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tools-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 639px) {
+  .tools-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.skills-search-input {
+  width: 200px;
+}
+
+@media (max-width: 767px) {
+  .skills-search-input {
+    width: 150px;
+  }
+}
+
+@media (max-width: 767px) {
+  .scope-chip-text {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .scope-shortcut {
+    display: none;
+  }
+}
+
+/* ===== Glass / backlit panel utilities (Raycast aesthetic) ===== */
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
+}
+
+.glass-elevated {
+  background: var(--glass-bg-elevated);
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
+}
+
+/* Ambient ember glow for modal overlays / floating panels. */
+.ambient-glow::before {
+  content: "";
+  position: absolute;
+  inset: -60%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 0%, var(--glow-ember) 0%, transparent 45%),
+    radial-gradient(circle at 80% 90%, var(--glow-ash) 0%, transparent 35%);
+  opacity: 0.8;
+  z-index: -1;
+}
+
+/* Luminous hover / active row used inside glass lists. */
+.glass-row {
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.glass-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.glass-row-active {
+  background-color: rgba(255, 255, 255, 0.07);
+  box-shadow: rgba(255, 255, 255, 0.08) 0px 1px 0px 0px inset;
+}
+
+:root:not(.dark) .glass-row:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+:root:not(.dark) .glass-row-active {
+  background-color: rgba(0, 0, 0, 0.06);
+  box-shadow: rgba(255, 255, 255, 0.8) 0px 1px 0px 0px inset;
+}
