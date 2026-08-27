@@ -30,3 +30,18 @@ former hard-coded execution token did not bind an immutable canary package or
 the installed robot-side protection boundary, so it cannot be used for the
 next physical attempt. The next canary is governed by Issue #27 and needs its
 own reviewable authorization package plus explicit maintainer approval.
+
+## Review-only authorization package
+
+`scripts/validate_g1_vla_canary_authorization.py` is the offline, fail-closed
+package validator for that gate. It SHA-binds one action plan, its static
+admission, the matching connected-G1 zero-write proof, the unique `humanoid`
+control entry, the guardian contract/deployment attestation, robot-side
+workspace/contact truth, a one-attempt budget, and halt-only dispositions.
+It accepts neither a retry nor an armed package, creates no publisher, and
+always reports `physical_execution_authorized: false`.
+
+The validator only makes an attestation reviewable; it cannot prove that a
+guardian has been installed inside `humanoid`. The current system has no such
+robot-side deployment attestation or workspace/contact truth producer, so a
+package cannot yet pass this gate honestly.
