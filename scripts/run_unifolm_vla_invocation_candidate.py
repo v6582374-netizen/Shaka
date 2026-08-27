@@ -112,19 +112,25 @@ def _run_preflight(command: list[str], timeout_s: float) -> dict[str, Any]:
         )
     except subprocess.TimeoutExpired as error:
         raise TimeoutError("UniFoLM-VLA zero-write preflight exceeded its deadline") from error
-    try:
-        result = json.loads(completed.stdout)
-    except json.JSONDecodeError as error:
-        raise RuntimeError("UniFoLM-VLA preflight returned invalid JSON") from error
+    result: dict[str, Any] | None = None
+    for line in reversed(completed.stdout.splitlines()):
+        try:
+            candidate = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            result = candidate
+            break
+    if result is None:
+        raise RuntimeError("UniFoLM-VLA preflight returned invalid JSON")
     if completed.returncode != 0:
         raise RuntimeError(f"UniFoLM-VLA preflight rejected: {result.get('reason', completed.stderr.strip())}")
-    if not isinstance(result, dict):
-        raise TypeError("UniFoLM-VLA preflight result must be an object")
     return result
 
 
 def _validate_plan(path: Path) -> dict[str, Any]:
     plan = _read_object(path, "UniFoLM-VLA action plan")
+    checkpoint = plan.get("checkpoint")
     contract = plan.get("contract")
     trajectory = plan.get("trajectory")
     if (
@@ -133,6 +139,9 @@ def _validate_plan(path: Path) -> dict[str, Any]:
         or plan.get("execution_mode") != "zero-write"
         or plan.get("command_publishers_created") != 0
         or plan.get("writes") != 0
+        or not isinstance(checkpoint, dict)
+        or not isinstance(checkpoint.get("sha256"), str)
+        or len(checkpoint["sha256"]) != 64
         or not isinstance(contract, dict)
         or contract.get("action_dimension") != ACTION_DIMENSION
         or contract.get("action_horizon") != ACTION_HORIZON
@@ -196,6 +205,7 @@ def run_candidate(
         raise RuntimeError("UniFoLM-VLA preflight did not preserve zero-write execution")
     raw_plan_path = raw_action_plan_output.resolve()
     raw_plan = _validate_plan(raw_plan_path)
+    checkpoint_digest = raw_plan["checkpoint"]["sha256"]
     plan_reference = result.get("action_plan")
     if not isinstance(plan_reference, dict) or plan_reference.get("path") != str(raw_plan_path):
         raise RuntimeError("UniFoLM-VLA preflight did not bind its action-plan output")
@@ -229,6 +239,7 @@ def run_candidate(
                 "protocol": "shaka.zero-write-vla-controller-trace.v1",
                 "loop_clock_id": "local_utc_ns",
                 "outcome": "running",
+                "checkpoint_digest": checkpoint_digest,
                 "frames": [
                     {
                         "phase": "act_task",

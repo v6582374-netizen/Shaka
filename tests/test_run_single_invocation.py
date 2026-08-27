@@ -318,6 +318,13 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
 
+    def require_native_motion_controller_topology(self, manifest: Path) -> None:
+        content = json.loads(manifest.read_text())
+        content["connected_g1"]["native_motion_controller_topology"] = True
+        manifest.write_text(
+            json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
     def start_cli(self, root: Path, manifest: Path) -> subprocess.Popen[str]:
         environment = os.environ.copy()
         environment.update(
@@ -704,6 +711,36 @@ class SingleInvocationRunnerTest(unittest.TestCase):
             self.assertEqual(
                 readiness["observed_command_publishers"],
                 [{"topic": "rt/lowcmd", "participant_key": participant_key}],
+            )
+
+    def test_connected_g1_verifies_rotating_native_motion_controller_topology(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_fixture(root)
+            self.configure_connected_g1(manifest)
+            self.require_native_motion_controller_topology(manifest)
+            previous_value = os.environ.get("SHAKA_FAKE_NATIVE_MOTION_CONTROLLER")
+            os.environ["SHAKA_FAKE_NATIVE_MOTION_CONTROLLER"] = "1"
+            try:
+                completed = self.run_cli(root, manifest, "--connected-g1")
+            finally:
+                if previous_value is None:
+                    os.environ.pop("SHAKA_FAKE_NATIVE_MOTION_CONTROLLER", None)
+                else:
+                    os.environ["SHAKA_FAKE_NATIVE_MOTION_CONTROLLER"] = previous_value
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            readiness = json.loads(
+                (root / "runs" / "RUN-001" / "artifacts" / "readiness-result.json").read_text()
+            )
+            self.assertEqual(
+                readiness["control_authority"], "verified_native_motion_controller"
+            )
+            self.assertEqual(
+                readiness["native_motion_controller_participant"],
+                "00000000-0000-0000-0000-000000000001",
             )
 
     def test_connected_g1_rejects_multiple_allowed_control_entries(self) -> None:

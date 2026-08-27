@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -21,6 +22,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class UniFoLMInvocationCandidateTest(unittest.TestCase):
+    def test_preflight_keeps_terminal_json_after_native_runtime_diagnostics(self) -> None:
+        completed = SimpleNamespace(
+            stdout=(
+                "native CUDA runtime diagnostic\n"
+                '{"result":"unifolm_vla_zero_write_preflight_ok","writes":0}\n'
+            ),
+            stderr="",
+            returncode=0,
+        )
+        with patch.object(MODULE.subprocess, "run", return_value=completed):
+            result = MODULE._run_preflight(["preflight"], 1.0)
+
+        self.assertEqual(result["result"], "unifolm_vla_zero_write_preflight_ok")
+
     def test_repository_package_binds_its_two_runtime_artifacts(self) -> None:
         directory = ROOT / "configs" / "unifolm-vla-brainco26-v001"
         package = json.loads((directory / "candidate-package.json").read_text())
@@ -91,6 +106,7 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
                             "schema_version": 1,
                             "kind": "unifolm_vla_action_plan_evidence",
                             "execution_mode": "zero-write",
+                            "checkpoint": {"sha256": "a" * 64},
                             "observation": {"captured_at_ns": 1234},
                             "contract": {
                                 "action_dimension": 26,
@@ -142,6 +158,7 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
                 controller_trace["frames"][0]["action_plan_sha256"],
                 result["action_plan"]["sha256"],
             )
+            self.assertEqual(controller_trace["checkpoint_digest"], "a" * 64)
             self.assertTrue(static_admission.is_file())
 
     def test_rejects_runtime_that_escapes_its_artifact_bundle(self) -> None:

@@ -32,6 +32,10 @@ from record_evaluator_episode import (
     _extract_hand_values,
 )
 
+NATIVE_MOTION_CONTROLLER_TOPICS = frozenset(
+    {"rt/lowcmd", "rt/sportmodestate", "rt/arm_sdk"}
+)
+
 
 def _command_publishers(
     participant: Any, topics: tuple[str, ...]
@@ -61,6 +65,86 @@ def _allowed_command_publishers(values: list[str]) -> set[tuple[str, str]]:
             raise ValueError("allowed command publisher must be '<topic>:<UUID>'")
         allowed.add((topic, participant_key))
     return allowed
+
+
+def _native_motion_controller_participant(
+    participant: Any, command_topics: tuple[str, ...], timeout_s: float
+) -> str:
+    """Verify the rotating native motion-controller identity by topology.
+
+    Unitree creates a fresh DDS participant UUID after a controller restart, so
+    a saved UUID is not an identity boundary. Its native control service has a
+    stable signature: one participant publishes ``rt/lowcmd`` and
+    ``rt/sportmodestate`` and owns the robot-side ``rt/arm_sdk`` subscription.
+    This function rejects any additional protected command writer.
+    """
+    if command_topics != ("rt/lowcmd",):
+        raise RuntimeError(
+            "native motion-controller topology only supports rt/lowcmd"
+        )
+    from cyclonedds.builtin import (
+        BuiltinDataReader,
+        BuiltinTopicDcpsPublication,
+        BuiltinTopicDcpsSubscription,
+    )
+    from cyclonedds.core import InstanceState, ReadCondition
+
+    readers = (
+        ("publication", BuiltinDataReader(participant, BuiltinTopicDcpsPublication)),
+        ("subscription", BuiltinDataReader(participant, BuiltinTopicDcpsSubscription)),
+    )
+    conditions = {
+        kind: ReadCondition(reader, InstanceState.Alive) for kind, reader in readers
+    }
+    endpoints: dict[tuple[str, str], tuple[str, str]] = {}
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        for kind, reader in readers:
+            for endpoint in reader.take(64, condition=conditions[kind]):
+                topic_name = str(getattr(endpoint, "topic_name", ""))
+                if topic_name not in NATIVE_MOTION_CONTROLLER_TOPICS:
+                    continue
+                endpoints[(kind, str(endpoint.key))] = (
+                    topic_name,
+                    str(endpoint.participant_key),
+                )
+        time.sleep(0.005)
+
+    def participants(kind: str, topic_name: str) -> set[str]:
+        return {
+            participant_key
+            for endpoint_kind, (endpoint_topic, participant_key) in endpoints.items()
+            if endpoint_kind[0] == kind and endpoint_topic == topic_name
+        }
+
+    lowcmd_publishers = participants("publication", "rt/lowcmd")
+    sport_publishers = participants("publication", "rt/sportmodestate")
+    arm_sdk_subscribers = participants("subscription", "rt/arm_sdk")
+    if len(lowcmd_publishers) != 1:
+        raise RuntimeError(
+            "expected exactly one alive rt/lowcmd publisher, found "
+            f"{len(lowcmd_publishers)}"
+        )
+    if len(sport_publishers) != 1:
+        raise RuntimeError(
+            "expected exactly one alive rt/sportmodestate publisher, found "
+            f"{len(sport_publishers)}"
+        )
+    if len(arm_sdk_subscribers) != 1:
+        raise RuntimeError(
+            "expected exactly one robot-side rt/arm_sdk subscriber, found "
+            f"{len(arm_sdk_subscribers)}"
+        )
+    native_participant = next(iter(lowcmd_publishers))
+    if (
+        native_participant not in sport_publishers
+        or native_participant not in arm_sdk_subscribers
+    ):
+        raise RuntimeError(
+            "rt/lowcmd, rt/sportmodestate, and rt/arm_sdk subscriber do not "
+            "belong to the same native motion-controller participant"
+        )
+    return native_participant
 
 
 def _check_dds_sources(participant: Any, timeout_s: float) -> None:
@@ -140,8 +224,21 @@ def readiness(args: argparse.Namespace) -> dict[str, Any]:
     ChannelFactoryInitialize(0, args.network_interface)
     participant = DomainParticipant(0)
     _check_dds_sources(participant, args.discovery_timeout_s)
-    publishers = _command_publishers(participant, tuple(args.command_topic))
     allowed_publishers = _allowed_command_publishers(args.allowed_command_publisher)
+    native_motion_controller_participant: str | None = None
+    if args.native_motion_controller_topology:
+        if allowed_publishers:
+            raise RuntimeError(
+                "native motion-controller topology cannot combine with a static "
+                "command publisher UUID"
+            )
+        native_motion_controller_participant = _native_motion_controller_participant(
+            participant, tuple(args.command_topic), args.discovery_timeout_s
+        )
+        publishers = [("rt/lowcmd", native_motion_controller_participant)]
+        allowed_publishers = set(publishers)
+    else:
+        publishers = _command_publishers(participant, tuple(args.command_topic))
     competing_publishers = sorted(set(publishers) - allowed_publishers)
     if competing_publishers:
         raise RuntimeError(
@@ -157,9 +254,13 @@ def readiness(args: argparse.Namespace) -> dict[str, Any]:
         environment="connected-g1",
         execution_mode="zero-write",
         control_authority=(
-            "verified_unique_control_entry"
-            if publishers
-            else "observed_no_command_publishers"
+            "verified_native_motion_controller"
+            if native_motion_controller_participant is not None
+            else (
+                "verified_unique_control_entry"
+                if publishers
+                else "observed_no_command_publishers"
+            )
         ),
         competing_command_publishers=0,
         observed_command_publishers=[
@@ -171,6 +272,7 @@ def readiness(args: argparse.Namespace) -> dict[str, Any]:
         physical_camera_sources=3,
         logical_camera_views=4,
         command_topics=list(args.command_topic),
+        native_motion_controller_participant=native_motion_controller_participant,
     )
 
 
@@ -214,6 +316,9 @@ def parse_args() -> argparse.Namespace:
     readiness_parser.add_argument("--command-topic", action="append", default=[])
     readiness_parser.add_argument(
         "--allowed-command-publisher", action="append", default=[]
+    )
+    readiness_parser.add_argument(
+        "--native-motion-controller-topology", action="store_true"
     )
 
     candidate_parser = subparsers.add_parser("candidate")

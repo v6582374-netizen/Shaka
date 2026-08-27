@@ -28,23 +28,23 @@ installation.
     "camera_host": "192.168.123.164",
     "discovery_timeout_s": 8.0,
     "command_topics": ["rt/lowcmd"],
-    "allowed_command_publishers": [
-      {
-        "topic": "rt/lowcmd",
-        "participant_key": "<DDS participant UUID of the unique control entry>"
-      }
-    ]
+    "native_motion_controller_topology": true
   }
 }
 ```
 
-`allowed_command_publishers` is optional and may contain only one DDS
-participant UUID: the deployment's existing unique control entry. That entry
-may own more than one protected topic, but a second participant UUID is
-rejected. This makes the entry auditable without masking a competing publisher:
-every observed publisher on a protected topic that is not listed here rejects
-the run. Do not copy the example UUID; discover the currently active entry
-immediately before creating the immutable manifest.
+For G1's native controller, set `native_motion_controller_topology` to `true`
+instead of copying a participant UUID. The controller receives a fresh DDS UUID
+after a restart; the readiness check therefore requires exactly one
+`rt/lowcmd` publisher whose participant also publishes `rt/sportmodestate` and
+owns the robot-side `rt/arm_sdk` subscription. A second `rt/lowcmd` publisher,
+or a broken three-way relationship, rejects the run. This mode only supports
+the protected topic `rt/lowcmd` and cannot be combined with a static UUID.
+
+`allowed_command_publishers` remains available for a deployment with a
+separately managed, stable control entry. It may contain only one DDS
+participant UUID; every observed publisher on a protected topic that is not
+listed there rejects the run.
 
 Before issuing the command, an operator must confirm that the G1, both BrainCo
 hands, three physical camera streams (the head stream supplies two logical

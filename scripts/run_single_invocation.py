@@ -81,6 +81,7 @@ class ConnectedG1:
     discovery_timeout_s: float
     command_topics: tuple[str, ...]
     allowed_command_publishers: tuple[tuple[str, str], ...]
+    native_motion_controller_topology: bool
 
 
 @dataclass(frozen=True)
@@ -493,6 +494,9 @@ def _connected_g1_configuration(value: Any) -> ConnectedG1 | None:
     discovery_timeout_s = value.get("discovery_timeout_s")
     command_topics = value.get("command_topics")
     allowed_command_publishers = value.get("allowed_command_publishers", [])
+    native_motion_controller_topology = value.get(
+        "native_motion_controller_topology", False
+    )
     if not isinstance(network_interface, str) or not network_interface:
         raise ManifestError("connected_g1 network_interface must be non-empty")
     if not isinstance(camera_host, str) or not camera_host:
@@ -512,6 +516,10 @@ def _connected_g1_configuration(value: Any) -> ConnectedG1 | None:
         raise ManifestError("connected_g1 command_topics must be non-empty and unique")
     if not isinstance(allowed_command_publishers, list):
         raise ManifestError("connected_g1 allowed_command_publishers must be a list")
+    if not isinstance(native_motion_controller_topology, bool):
+        raise ManifestError(
+            "connected_g1 native_motion_controller_topology must be a boolean"
+        )
     allowed: list[tuple[str, str]] = []
     for publisher in allowed_command_publishers:
         if not isinstance(publisher, dict):
@@ -535,12 +543,23 @@ def _connected_g1_configuration(value: Any) -> ConnectedG1 | None:
         raise ManifestError(
             "allowed command publishers must identify one unique control entry"
         )
+    if native_motion_controller_topology:
+        if command_topics != ["rt/lowcmd"]:
+            raise ManifestError(
+                "native motion-controller topology only protects rt/lowcmd"
+            )
+        if allowed:
+            raise ManifestError(
+                "native motion-controller topology cannot combine with a static "
+                "command publisher UUID"
+            )
     return ConnectedG1(
         network_interface=network_interface,
         camera_host=camera_host,
         discovery_timeout_s=float(discovery_timeout_s),
         command_topics=tuple(command_topics),
         allowed_command_publishers=tuple(allowed),
+        native_motion_controller_topology=native_motion_controller_topology,
     )
 
 
@@ -1189,6 +1208,8 @@ def run(manifest_path: Path, *, connected_g1: bool = False) -> dict[str, Any]:
                 readiness_arguments.extend(
                     ["--allowed-command-publisher", f"{topic}:{participant_key}"]
                 )
+            if manifest.connected_g1.native_motion_controller_topology:
+                readiness_arguments.append("--native-motion-controller-topology")
         readiness = _run_adapter(
             adapter_path,
             "readiness",

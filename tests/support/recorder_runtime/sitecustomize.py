@@ -130,9 +130,44 @@ class DataReader:
         )
 
 
+BuiltinTopicDcpsPublication = object()
+BuiltinTopicDcpsSubscription = object()
+
+
 class BuiltinDataReader:
     def __init__(self, participant: DomainParticipant, builtin_topic: object) -> None:
-        del participant, builtin_topic
+        del participant
+        self.kind = (
+            "subscription"
+            if builtin_topic is BuiltinTopicDcpsSubscription
+            else "publication"
+        )
+
+    def take(self, maximum: int, condition: object):
+        del maximum, condition
+        if not os.environ.get("SHAKA_FAKE_NATIVE_MOTION_CONTROLLER"):
+            return []
+        participant_key = "00000000-0000-0000-0000-000000000001"
+        if self.kind == "publication":
+            return [
+                types.SimpleNamespace(
+                    key="native-lowcmd-publication",
+                    topic_name="rt/lowcmd",
+                    participant_key=participant_key,
+                ),
+                types.SimpleNamespace(
+                    key="native-sport-publication",
+                    topic_name="rt/sportmodestate",
+                    participant_key=participant_key,
+                ),
+            ]
+        return [
+            types.SimpleNamespace(
+                key="native-arm-sdk-subscription",
+                topic_name="rt/arm_sdk",
+                participant_key=participant_key,
+            )
+        ]
 
     def take_iter(self, condition: object, timeout: object):
         del condition, timeout
@@ -151,6 +186,13 @@ class BuiltinDataReader:
                     "00000000-0000-0000-0000-000000000001",
                 ),
             )
+        if os.environ.get("SHAKA_FAKE_NATIVE_MOTION_CONTROLLER"):
+            for endpoint in self.take(64, object()):
+                yield types.SimpleNamespace(
+                    topic_name=endpoint.topic_name,
+                    type_id=endpoint.topic_name,
+                    participant_key=endpoint.participant_key,
+                )
         for topic_name in topics:
             yield types.SimpleNamespace(
                 topic_name=topic_name,
@@ -175,7 +217,8 @@ util.__dict__["duration"] = lambda **values: values
 builtin.__dict__.update(
     {
         "BuiltinDataReader": BuiltinDataReader,
-        "BuiltinTopicDcpsPublication": object(),
+        "BuiltinTopicDcpsPublication": BuiltinTopicDcpsPublication,
+        "BuiltinTopicDcpsSubscription": BuiltinTopicDcpsSubscription,
     }
 )
 core.__dict__.update({"InstanceState": InstanceState, "ReadCondition": ReadCondition})
