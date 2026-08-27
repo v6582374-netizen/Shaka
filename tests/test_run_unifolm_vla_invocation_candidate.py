@@ -22,6 +22,26 @@ SPEC.loader.exec_module(MODULE)
 
 
 class UniFoLMInvocationCandidateTest(unittest.TestCase):
+    def test_vla_environment_prefers_the_model_runtime_cuda_libraries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            python = root / "bin" / "python"
+            python.parent.mkdir()
+            python.touch()
+            site_packages = root / "lib" / "python3.10" / "site-packages" / "nvidia"
+            nvjitlink = site_packages / "nvjitlink" / "lib"
+            cusparse = site_packages / "cusparse" / "lib"
+            nvjitlink.mkdir(parents=True)
+            cusparse.mkdir(parents=True)
+
+            with patch.dict(MODULE.os.environ, {"LD_LIBRARY_PATH": "/system/cuda"}, clear=False):
+                environment = MODULE._vla_environment(python)
+
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"],
+            f"{nvjitlink}:{cusparse}:/system/cuda",
+        )
+
     def test_preflight_keeps_terminal_json_after_native_runtime_diagnostics(self) -> None:
         completed = SimpleNamespace(
             stdout=(
@@ -31,10 +51,12 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
             stderr="",
             returncode=0,
         )
-        with patch.object(MODULE.subprocess, "run", return_value=completed):
-            result = MODULE._run_preflight(["preflight"], 1.0)
+        environment = {"LD_LIBRARY_PATH": "/runtime/cuda"}
+        with patch.object(MODULE.subprocess, "run", return_value=completed) as run:
+            result = MODULE._run_preflight(["preflight"], 1.0, environment)
 
         self.assertEqual(result["result"], "unifolm_vla_zero_write_preflight_ok")
+        self.assertEqual(run.call_args.kwargs["env"], environment)
 
     def test_repository_package_binds_its_two_runtime_artifacts(self) -> None:
         directory = ROOT / "configs" / "unifolm-vla-brainco26-v001"
@@ -97,9 +119,12 @@ class UniFoLMInvocationCandidateTest(unittest.TestCase):
             static_admission = root / "static-admission.json"
             trace = root / "controller-trace.json"
 
-            def fake_preflight(command: list[str], timeout_s: float) -> dict[str, object]:
+            def fake_preflight(
+                command: list[str], timeout_s: float, environment: dict[str, str] | None = None
+            ) -> dict[str, object]:
                 self.assertIn(str(observation), command)
                 self.assertGreater(timeout_s, 0)
+                self.assertIsNotNone(environment)
                 raw_action_plan.write_text(
                     json.dumps(
                         {

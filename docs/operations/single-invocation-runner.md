@@ -5,7 +5,7 @@ immutable JSON manifest. Offline replay is the default; a separately configured
 connected-G1 path is available for the final physical admission gate:
 
 ```bash
-python scripts/run_single_invocation.py --manifest /path/to/run-manifest.json
+.venv/bin/python scripts/run_single_invocation.py --manifest /path/to/run-manifest.json
 ```
 
 ## Connected-G1 zero-write acceptance
@@ -54,12 +54,17 @@ manifest-bound unique control entry. The command refuses to proceed if it
 discovers an unbound publisher on a protected topic.
 
 ```bash
-PYTHONPATH=/home/loongge/TWIST2-master/unitree_sdk2/python_binding/build-py310/lib \
-  /home/loongge/miniconda3/envs/lerobot/bin/python \
-  scripts/run_single_invocation.py \
+.venv/bin/python scripts/run_single_invocation.py \
   --manifest /absolute/path/to/connected-g1-run-manifest.json \
   --connected-g1
 ```
+
+The project `.venv` is the runner runtime: it contains the DDS/Unitree reader
+dependencies and the evaluator's image/schema dependencies. The candidate then
+launches its separately frozen UniFoLM environment. That subprocess gives its
+matching CUDA 12.4 nvJitLink/cuSPARSE libraries precedence over any host CUDA
+12.1 libraries, preventing an ABI-mixed model startup. This remains entirely
+inside the zero-write candidate subprocess.
 
 The connected readiness adapter first discovers and validates one G1 state
 sample and one sample from each BrainCo hand, receives and validates a frame

@@ -41,6 +41,40 @@ STATIC_INPUTS = {
 }
 
 
+def _vla_environment(python: Path) -> dict[str, str]:
+    """Prefer CUDA libraries shipped with the frozen model runtime.
+
+    The host currently exposes CUDA 12.1 system libraries while the frozen
+    UniFoLM runtime uses CUDA 12.4.  Prepending the runtime's paired nvJitLink
+    and cuSPARSE directories prevents the dynamic loader from mixing the two.
+    This changes only the inference subprocess environment; it has no control
+    transport effect.
+    """
+    environment = os.environ.copy()
+    prefix = python.resolve().parent.parent
+    nvidia = next(
+        (
+            path
+            for path in (prefix / "lib").glob("python*/site-packages/nvidia")
+            if path.is_dir()
+        ),
+        None,
+    )
+    if nvidia is None:
+        return environment
+    runtime_libraries = [
+        nvidia / "nvjitlink" / "lib",
+        nvidia / "cusparse" / "lib",
+    ]
+    existing = environment.get("LD_LIBRARY_PATH")
+    paths = [str(path) for path in runtime_libraries if path.is_dir()]
+    if existing:
+        paths.append(existing)
+    if paths:
+        environment["LD_LIBRARY_PATH"] = ":".join(paths)
+    return environment
+
+
 def _read_object(path: Path, description: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -105,10 +139,17 @@ def _runtime_configuration(runtime_package: Path) -> tuple[str, dict[str, Any]]:
     return candidate_id, {"instruction": instruction, "device": device, "seed": seed}
 
 
-def _run_preflight(command: list[str], timeout_s: float) -> dict[str, Any]:
+def _run_preflight(
+    command: list[str], timeout_s: float, environment: dict[str, str] | None = None
+) -> dict[str, Any]:
     try:
         completed = subprocess.run(
-            command, capture_output=True, text=True, timeout=timeout_s, check=False
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+            env=environment,
         )
     except subprocess.TimeoutExpired as error:
         raise TimeoutError("UniFoLM-VLA zero-write preflight exceeded its deadline") from error
@@ -196,7 +237,8 @@ def run_candidate(
         "--seed",
         str(configuration["seed"]),
     ]
-    result = _run_preflight(command, timeout_s)
+    environment = _vla_environment(python)
+    result = _run_preflight(command, timeout_s, environment)
     if (
         result.get("result") != "unifolm_vla_zero_write_preflight_ok"
         or result.get("command_publishers_created") != 0
