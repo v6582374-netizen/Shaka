@@ -394,14 +394,12 @@ def _record(args: argparse.Namespace, lifecycle: RecorderLifecycle) -> dict[str,
 
     termination_reason = "fixed_duration_elapsed"
     try:
-        with (
-            controller_path.open("w", encoding="utf-8") as controller_stream,
-            state_path.open("w", encoding="utf-8") as state_stream,
-            hand_path.open("w", encoding="utf-8", newline="") as hand_stream,
+        with controller_path.open("w", encoding="utf-8") as controller_stream, \
+            state_path.open("w", encoding="utf-8") as state_stream, \
+            hand_path.open("w", encoding="utf-8", newline="") as hand_stream, \
             camera_timestamp_path.open(
                 "w", encoding="utf-8", newline=""
-            ) as camera_stream,
-        ):
+            ) as camera_stream:
             hand_writer = csv.writer(hand_stream)
             hand_writer.writerow(
                 [
