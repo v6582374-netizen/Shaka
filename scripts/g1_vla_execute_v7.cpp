@@ -1,9 +1,10 @@
-// One-shot G1 + BrainCo executor for one immutable 25x26 VLA plan.
+// Historical G1 + BrainCo VLA canary verifier for one immutable 25x26 plan.
 //
-// This program publishes only through rt/arm_sdk and the two BrainCo command
-// topics. It refuses a competing arm publisher, checks CRC-valid stationary
-// feedback, validates every hand message before arm authority is created, and
-// always returns arm authority to zero after an attempted execution.
+// This program remains a read-only dry-run diagnostic. Its former write path
+// predates the immutable authorization package required by Issue #27, so it
+// must never create rt/arm_sdk or BrainCo publishers. A future physical canary
+// needs a separately reviewed command that binds the authorization package,
+// the current control-entry topology, and the installed protection boundary.
 #include <algorithm>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -117,7 +118,11 @@ Args Parse(int argc, char** argv) {
     else throw std::runtime_error("invalid V7 argument: " + value);
   }
   if (args.network.empty() || args.plan.empty()) throw std::runtime_error("network interface and action plan are required");
-  if (args.execute && args.authorization != kAuthorization) throw std::runtime_error("V7 execution authorization is absent or invalid");
+  if (args.execute) {
+    throw std::runtime_error(
+        "physical execution is retired: prepare and explicitly authorize the "
+        "Issue #27 canary package instead");
+  }
   if (!args.execute && !args.authorization.empty()) throw std::runtime_error("authorization requires --execute");
   return args;
 }

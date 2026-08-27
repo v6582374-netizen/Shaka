@@ -24,3 +24,9 @@ Future policy/control evolution must treat the measured shoulder-load boundary
 as a negative physical sample and produce a trajectory with feedback-aware
 retiming or an action representation calibrated to the `rt/arm_sdk` stiffness
 controller. It must not record either canary as a task success.
+
+The historical `g1_vla_execute_v7.cpp` executable is now dry-run only. Its
+former hard-coded execution token did not bind an immutable canary package or
+the installed robot-side protection boundary, so it cannot be used for the
+next physical attempt. The next canary is governed by Issue #27 and needs its
+own reviewable authorization package plus explicit maintainer approval.
