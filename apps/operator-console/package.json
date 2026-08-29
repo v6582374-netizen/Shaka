@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-with-g1-monitor.mjs",
+    "dev:ui": "vite",
     "prototype:g1-status": "vite",
     "build": "tsc && vite build",
     "skills-manager:css": "node scripts/build-skills-manager-css.mjs",

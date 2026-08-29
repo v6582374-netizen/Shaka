@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Shaka 当前高层运行时架构：Connected-G1 Zero-Write 闭环",
+    "locale": "zh-CN",
+    "output": "shaka-runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/v6582374-netizen/Shaka",
+      "revision": "e1dc329738eded54b2afa4540e95148c80d85517"
+    },
+    "viewBox": [980, 460]
+  },
+  "components": [
+    {
+      "id": "manifest",
+      "type": "frontend",
+      "label": "操作员与不可变清单",
+      "sublabel": "单次调用 · 预算 · SHA-256 绑定",
+      "tag": "入口",
+      "pos": [30, 100],
+      "size": [142, 68],
+      "sources": [
+        { "path": "docs/operations/single-invocation-runner.md", "line": 1, "label": "运行入口" },
+        { "path": "docs/adr/0001-freeze-only-the-physical-research-loop-contracts.md", "line": 10, "label": "冻结契约" }
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "单次调用运行器",
+      "sublabel": "校验 → 编排 → 失败原子发布",
+      "tag": "trusted",
+      "pos": [212, 100],
+      "size": [146, 68],
+      "sources": [
+        { "path": "scripts/run_single_invocation.py", "line": 1164, "label": "run()" }
+      ]
+    },
+    {
+      "id": "readiness",
+      "type": "security",
+      "label": "就绪与控制权检查",
+      "sublabel": "DDS / 相机 / 竞争发布者",
+      "tag": "fail-closed",
+      "pos": [394, 100],
+      "size": [148, 68],
+      "sources": [
+        { "path": "scripts/_connected_g1_zero_write_adapter.py", "line": 214, "label": "readiness()" }
+      ]
+    },
+    {
+      "id": "robot",
+      "type": "external",
+      "label": "Unitree G1 物理系统",
+      "sublabel": "G1 / BrainCo 状态 + 3 路相机",
+      "tag": "read-only",
+      "pos": [576, 100],
+      "size": [150, 68],
+      "sources": [
+        { "path": "docs/operations/single-invocation-runner.md", "line": 31, "label": "真实源检查" },
+        { "path": "scripts/g1_monitor_bridge.py", "line": 189, "label": "只读监视" }
+      ]
+    },
+    {
+      "id": "recorder",
+      "type": "backend",
+      "label": "只读证据记录器",
+      "sublabel": "状态 · 三机位 · 四逻辑视角",
+      "tag": "trusted",
+      "pos": [758, 100],
+      "size": [148, 68],
+      "sources": [
+        { "path": "scripts/record_evaluator_episode.py", "line": 730, "label": "record()" },
+        { "path": "scripts/run_single_invocation.py", "line": 1102, "label": "握手启动" }
+      ]
+    },
+    {
+      "id": "candidate",
+      "type": "cloud",
+      "label": "UniFoLM VLA 候选运行时",
+      "sublabel": "冻结模型 + CUDA · inference-only",
+      "tag": "zero-write",
+      "pos": [755, 280],
+      "size": [154, 68],
+      "sources": [
+        { "path": "scripts/run_unifolm_vla_invocation_candidate.py", "line": 249, "label": "run_candidate()" },
+        { "path": "scripts/_connected_g1_zero_write_adapter.py", "line": 280, "label": "固定 VLA 分派" }
+      ]
+    },
+    {
+      "id": "admission",
+      "type": "security",
+      "label": "动作投影与静态准入",
+      "sublabel": "维度 · 关节序 · URDF · 速度界",
+      "tag": "trusted",
+      "pos": [576, 280],
+      "size": [154, 68],
+      "sources": [
+        { "path": "scripts/validate_g1_vla_action_plan.py", "line": 176, "label": "validate()" }
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "证据终结与工件库",
+      "sublabel": "完整性 · 身份 · SHA-256",
+      "tag": "immutable",
+      "pos": [394, 280],
+      "size": [148, 68],
+      "sources": [
+        { "path": "scripts/run_single_invocation.py", "line": 1334, "label": "证据终结" },
+        { "path": "docs/operations/vlm-task-evaluator.md", "line": 17, "label": "独立工件" }
+      ]
+    },
+    {
+      "id": "evaluator",
+      "type": "external",
+      "label": "独立多模态评估器",
+      "sublabel": "OpenAI Responses 或 Codex CLI",
+      "tag": "external AI",
+      "pos": [212, 280],
+      "size": [152, 68],
+      "sources": [
+        { "path": "scripts/evaluate_episode_with_vlm.py", "line": 443, "label": "evaluate_evidence()" },
+        { "path": "docs/operations/vlm-task-evaluator.md", "line": 42, "label": "模型后端" }
+      ]
+    },
+    {
+      "id": "audit",
+      "type": "frontend",
+      "label": "人工审校与终态",
+      "sublabel": "五态结果 · 首次成功需确认",
+      "tag": "human gate",
+      "pos": [30, 280],
+      "size": [142, 68],
+      "sources": [
+        { "path": "CONTEXT.md", "line": 103, "label": "首次可信成功" },
+        { "path": "scripts/evaluate_episode_with_vlm.py", "line": 532, "label": "人工审校" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "本地主机信任边界：清单校验、编排与控制权门",
+      "wraps": ["runner", "readiness"],
+      "pad": 14
+    },
+    {
+      "kind": "region",
+      "label": "外部物理边界：机器人、灵巧手与相机",
+      "wraps": ["robot"],
+      "pad": 14
+    },
+    {
+      "kind": "security-group",
+      "label": "候选信任边界：冻结运行时，无发布器、无写入",
+      "wraps": ["candidate"],
+      "pad": 14
+    },
+    {
+      "kind": "region",
+      "label": "外部模型边界",
+      "wraps": ["evaluator"],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    { "id": "c1", "from": "manifest", "to": "runner", "label": "manifest v2", "variant": "emphasis", "labelDy": 58, "width": 2 },
+    { "id": "c2", "from": "runner", "to": "readiness", "label": "claim + preflight", "variant": "emphasis", "labelDy": 58, "width": 2 },
+    { "id": "c3", "from": "readiness", "to": "robot", "label": "DDS / ZeroMQ 读取", "variant": "security", "labelDy": 58, "width": 2 },
+    { "id": "c4", "from": "robot", "to": "recorder", "label": "状态 + JPEG", "variant": "emphasis", "labelDy": 58, "width": 2 },
+    { "id": "c5", "from": "recorder", "to": "candidate", "label": "live-observation.json", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelDy": 58, "width": 2 },
+    { "id": "c6", "from": "candidate", "to": "admission", "label": "动作计划 + digest", "variant": "security", "labelDy": 58, "width": 2 },
+    { "id": "c7", "from": "admission", "to": "evidence", "label": "零写入轨迹证据", "variant": "emphasis", "labelDy": 58, "width": 2 },
+    { "id": "c8", "from": "evidence", "to": "evaluator", "label": "四视角证据面板", "variant": "security", "labelDy": 58, "width": 2 },
+    { "id": "c9", "from": "evaluator", "to": "audit", "label": "结构化五态结果", "variant": "emphasis", "labelDy": 58, "width": 2 }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "当前已验证主路径",
+      "items": [
+        "connected-G1 zero-write：真实观测 → 候选推理 → 静态准入 → 证据 → 独立评估。",
+        "全链 publishers = 0、writes = 0；候选不能写入 task_result。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "物理执行仍未闭合",
+      "items": [
+        "尚无 robot-side guardian 部署证明，也无 workspace/contact 真值生产者。",
+        "g1_vla_execute_v7 已降为 dry-run；P0 supervised canary 是需显式授权的独立实验。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "外部依赖与控制面缺口",
+      "items": [
+        "外部：Unitree DDS、BrainCo/相机 ZeroMQ、UniFoLM + CUDA、OpenAI Responses 或 Codex CLI。",
+        "控制台调用外部 /v1/embodied/runs；仓库内无对应服务端处理器，G1 monitor 仅只读。"
+      ]
+    }
+  ]
+}

@@ -55,6 +55,15 @@ const RETIRED_INTEGRATED_PATHS = [
   /^src\/i18n\/locales\/zh\.ts$/,
   /^src\/lib\/fontFamily(?:\.test)?\.ts$/,
 ];
+const RETIRED_ONBOARDING_PATHS = new Set([
+  "src/components/welcome/DirectorySetupStep.tsx",
+  "src/components/welcome/ImportSkillsStep.tsx",
+  "src/components/welcome/ToolDetectionStep.tsx",
+  "src/components/welcome/WelcomeStep.tsx",
+  "src/components/welcome/index.ts",
+  "src/hooks/useInitialization.ts",
+  "src/pages/Welcome.tsx",
+]);
 
 // Retained only to explain the original migration record; these entries are not claims about
 // the current console, which has no Rust/Tauri host source.
@@ -207,6 +216,15 @@ const ADAPTATIONS = [
     upstream_sync_strategy: "Reapply the BrowserRouter-to-MemoryRouter substitution after each upstream refresh.",
   },
   {
+    id: "no-first-run-skills-wizard",
+    upstream_scope: ["src/pages/Welcome.tsx", "src/components/welcome/**/*", "src/hooks/useInitialization.ts"],
+    integrated_scope: ["src/features/skills-manager/App.tsx"],
+    reason: "The embedded Skills workspace must open directly to its inventory instead of blocking first use with setup steps.",
+    behavioral_impact: "The retained Skills, Tools, Settings, and Editor UI renders without reading or writing the upstream initialization state.",
+    regression_coverage: ["npm run build", "npm run skills-manager:test", "npm run skills-manager:verify"],
+    upstream_sync_strategy: "Keep the onboarding sources retired unless the host explicitly restores a first-run flow.",
+  },
+  {
     id: "workspace-scoped-theme",
     upstream_scope: ["src/hooks/useTheme.tsx document.documentElement mutations"],
     integrated_scope: ["src/features/skills-manager/hooks/useTheme.tsx .skills-manager-root mutations"],
@@ -307,6 +325,12 @@ async function scanGitTree(root, relative = "") {
 }
 
 function disposition(upstreamPath) {
+  if (RETIRED_ONBOARDING_PATHS.has(upstreamPath)) {
+    return {
+      status: "retired-integrated-surface",
+      integrated_paths: [],
+    };
+  }
   if (isRetiredRemotePath(upstreamPath)) {
     return {
       status: "retired-remote-feature",

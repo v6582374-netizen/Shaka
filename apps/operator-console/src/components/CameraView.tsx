@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 import { PanelHead } from "./PanelHead";
 
 const CAMERA_HOST_KEY = "vegapunk:camera-host:v1";
+const DEFAULT_CAMERA_HOST = "192.168.123.164";
 
 const CAMERAS = [
   { id: "head", label: "Head stereo", detail: "1280 × 480 · left / right", aspect: "aspect-[8/3]", featured: true },
@@ -128,7 +129,7 @@ function CameraFeed({
 }
 
 export function CameraView() {
-  const [host, setHost] = useState(() => localStorage.getItem(CAMERA_HOST_KEY) ?? "");
+  const [host, setHost] = useState(() => localStorage.getItem(CAMERA_HOST_KEY) ?? DEFAULT_CAMERA_HOST);
   const [activeHost, setActiveHost] = useState<string | null>(null);
   const [cameras, setCameras] = useState<CameraState>(initialState);
   const [message, setMessage] = useState<string | null>(null);

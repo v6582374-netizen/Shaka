@@ -9,12 +9,164 @@
 
 declare const __COWORKER_DEV_TOKEN__: string;
 
+import type { AppConfig, Skill, Tool } from "./types";
+
 type Callback = (event: { event: string; id: number; payload?: unknown }) => void;
 type InvokeArgs = Record<string, unknown>;
 
 const bridgeCallbacks = new Map<number, Callback>();
 const bridgeEvents = new Map<string, Set<number>>();
 let nextCallbackId = 1;
+
+// The browser workspace is a visual reference for the desktop Skills Manager, not a second
+// Skill host. Keep a stable inventory here so it renders without filesystem, Tauri, or HTTP
+// access. Mutating controls intentionally have no persistence behind them.
+const STATIC_SKILLS: Skill[] = [
+  {
+    id: "codebase-memory",
+    instance_id: "global:codebase-memory",
+    scope: "global",
+    name: "codebase-memory",
+    description: "Navigate and query a repository knowledge graph.",
+    version: "1.0.0",
+    source: "local",
+    enabled: { codex: true, "claude-code": true, cursor: false },
+    link_status: { codex: "linked", "claude-code": "linked", cursor: "missing" },
+    read_only: true,
+    can_edit: false,
+    can_delete: false,
+    toggle_allowed: { codex: false, "claude-code": false, cursor: false },
+    path: "~/.codex/skills/codebase-memory",
+  },
+  {
+    id: "imagegen",
+    instance_id: "global:imagegen",
+    scope: "global",
+    name: "imagegen",
+    description: "Generate and edit raster images for product interfaces.",
+    version: "1.0.0",
+    source: "local",
+    enabled: { codex: true, "claude-code": false, cursor: false },
+    link_status: { codex: "linked", "claude-code": "missing", cursor: "missing" },
+    read_only: true,
+    can_edit: false,
+    can_delete: false,
+    toggle_allowed: { codex: false, "claude-code": false, cursor: false },
+    path: "~/.codex/skills/imagegen",
+  },
+  {
+    id: "openai-docs",
+    instance_id: "global:openai-docs",
+    scope: "global",
+    name: "openai-docs",
+    description: "Research OpenAI products, APIs, and Codex documentation.",
+    version: "1.0.0",
+    source: "local",
+    enabled: { codex: true, "claude-code": false, cursor: false },
+    link_status: { codex: "linked", "claude-code": "missing", cursor: "missing" },
+    read_only: true,
+    can_edit: false,
+    can_delete: false,
+    toggle_allowed: { codex: false, "claude-code": false, cursor: false },
+    path: "~/.codex/skills/openai-docs",
+  },
+  {
+    id: "diagnosing-bugs",
+    instance_id: "global:diagnosing-bugs",
+    scope: "global",
+    name: "diagnosing-bugs",
+    description: "Build deterministic feedback loops for difficult failures.",
+    version: "1.0.0",
+    source: "local",
+    enabled: { codex: true, "claude-code": true, cursor: false },
+    link_status: { codex: "linked", "claude-code": "linked", cursor: "missing" },
+    read_only: true,
+    can_edit: false,
+    can_delete: false,
+    toggle_allowed: { codex: false, "claude-code": false, cursor: false },
+    path: "~/.agents/skills/diagnosing-bugs",
+  },
+];
+
+const STATIC_TOOLS: Tool[] = [
+  {
+    id: "codex",
+    name: "Codex",
+    detected: true,
+    cli_available: true,
+    source: "builtin",
+    config: { enabled: true, detected: true, skills_path: "~/.codex/skills", config_path: "~/.codex/config.toml" },
+  },
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    detected: true,
+    cli_available: true,
+    source: "builtin",
+    config: { enabled: true, detected: true, skills_path: "~/.claude/skills", config_path: "~/.claude/settings.json" },
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    detected: false,
+    cli_available: false,
+    source: "builtin",
+    config: { enabled: false, detected: false, skills_path: "~/.cursor/skills", config_path: "~/.cursor/settings.json" },
+  },
+];
+
+const STATIC_CONFIG: AppConfig = {
+  version: "1.0.0",
+  skills_dir: "~/.codex/skills",
+  tools: Object.fromEntries(STATIC_TOOLS.map((tool) => [tool.id, tool.config])),
+  skill_metadata: {
+    "global:codebase-memory": { tags: ["development", "repository"] },
+    "global:imagegen": { tags: ["design", "media"] },
+    "global:openai-docs": { tags: ["research"] },
+    "global:diagnosing-bugs": { tags: ["development"] },
+  },
+  preferences: {
+    auto_sync: false,
+    sync_on_save: false,
+    default_editor: "builtin",
+    tab_size: 2,
+    show_sync_notifications: false,
+    remove_links_when_disabling_tool: false,
+    skill_usage_monitor: false,
+    risk_scan_mode: "off",
+  },
+};
+
+function copySnapshot<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function invokeStaticSkillSnapshot(command: string): unknown {
+  switch (command) {
+    case "list_skills":
+    case "refresh_skills":
+      return copySnapshot(STATIC_SKILLS);
+    case "list_skill_packages":
+      return [];
+    case "get_config":
+      return copySnapshot(STATIC_CONFIG);
+    case "detect_tools":
+      return copySnapshot(STATIC_TOOLS);
+    case "get_skill_usage_stats":
+    case "get_risk_reports_batch":
+    case "get_cached_skill_translations":
+      return {};
+    case "is_llm_provider_configured":
+      return false;
+    case "check_sync_status":
+      return { issues_count: 0 };
+    case "fix_sync_issues":
+      return { success: [], failed: [] };
+    default:
+      // Presentation controls are intentionally inert in the browser snapshot.
+      return null;
+  }
+}
 
 const isNativeTauri = (): boolean =>
   typeof (globalThis as any).__TAURI_INTERNALS__?.invoke === "function";
@@ -167,6 +319,9 @@ const bridgeInvoke = async (
   if (command === "plugin:event|emit" || command === "plugin:event|emit_to") {
     invokeLocalEvent(String(args.event ?? ""), args.payload);
     return null;
+  }
+  if (hostedWeb() || viteDevProxy()) {
+    return invokeStaticSkillSnapshot(command);
   }
   if (command === "plugin:dialog|open") {
     return browserDialogOpen(((args.options as Record<string, unknown> | undefined) ?? {}));

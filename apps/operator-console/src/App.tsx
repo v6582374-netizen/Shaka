@@ -15,10 +15,7 @@ import {
   getUnattended,
   PERSONAS_CHANGED,
   resolveInboxItem,
-  deleteSession,
-  renameSession,
   runAutomation,
-  setSessionFlags,
   setUnattended,
   Session,
   type InboxItem,
@@ -56,14 +53,13 @@ import { ApprovalCard } from "./components/ApprovalCard";
 import { DirectoryRequestCard } from "./components/DirectoryRequestCard";
 import { PlanCard } from "./components/PlanCard";
 import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
-import { SkillsManagerPrototype } from "./components/SkillsManagerPrototype";
 import { AgentsMdPrototype } from "./components/AgentsMdPrototype";
 import { TranslationView } from "./components/TranslationView";
 import { BabelDocPrototype } from "./components/BabelDocPrototype";
 import { BabelDocSettingsPrototype } from "./components/BabelDocSettingsPrototype";
 import { EmbodiedPrototype } from "./components/EmbodiedPrototype";
 import { G1StatusSidebarPrototype } from "./components/G1StatusSidebarPrototype";
-import { SkillsManagerWorkspace } from "./components/SkillsManagerWorkspace";
+import { RobotSkillBankWorkspace } from "./components/RobotSkillBankWorkspace";
 import { AgentsMdWorkspace, type AgentsMdFileTarget } from "./components/AgentsMdWorkspace";
 import { AgentsMdEditorWorkspace } from "./components/AgentsMdEditorWorkspace";
 import { DiscoveryView } from "./components/DiscoveryView";
@@ -161,7 +157,6 @@ function fallbackWorkspace(current: string | null, projects: RecentWorkspace[]):
 export function App() {
   const params = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
   const prototype = params?.get("prototype") ?? null;
-  if (prototype === "skills-manager") return <SkillsManagerPrototype />;
   if (prototype === "agents-md") return <AgentsMdPrototype />;
   if (prototype === "babeldoc") return <BabelDocPrototype />;
   if (prototype === "babeldoc-settings") return <BabelDocSettingsPrototype />;
@@ -257,13 +252,13 @@ function VegapunkApp() {
     | "inbox"
     | "persona"
     | "settings"
-    | "skills-manager"
+    | "skill-bank"
     | "agents-md"
     | "agents-md-editor"
     | "discovery"
     | "translation"
     | "youtube"
-  >("session");
+  >("g1-monitor");
   const [agentsMdTarget, setAgentsMdTarget] = useState<AgentsMdFileTarget | null>(null);
   // A remembered Scheduled-detail target must not outlive the surface (see the
   // scheduledOpenId comment above): nav re-entry lands on the list, never a
@@ -976,56 +971,6 @@ function VegapunkApp() {
     setSessionId(newId());
     getRecentWorkspaces().then(setProjects).catch(() => {});
   };
-  // "New project" lives under a project-scoped persona's accordion. Switch to that persona, start a
-  // fresh session with no folder yet, and open the gate in create mode — so the gate's
-  // surface==="session" && gatesWorkspace(agent) guard passes even if the active session was Chat/Cowork.
-  const newProject = (forAgent?: string) => {
-    const target = forAgent || agent;
-    setSurface("session");
-    setItems([]);
-    setStreaming("");
-    setTodo([]);
-    setRunning(false);
-    if (target !== agent) setAgent(target);
-    setWorkspace(null);
-    setBranch(null);
-    setSessionId(newId());
-    setGateCreate(true);
-    setShowGate(true);
-  };
-  const renameConversation = async (id: string, title: string) => {
-    const res = await renameSession(id, title);
-    if (res.ok) refreshSessions();
-  };
-  const togglePinned = async (id: string, pinned: boolean) => {
-    await setSessionFlags(id, { pinned });
-    refreshSessions();
-  };
-  const toggleArchived = async (id: string, archived: boolean) => {
-    await setSessionFlags(id, { archived });
-    refreshSessions();
-    // Archiving the open chat: leave it and start fresh (it moves to the Archived section).
-    if (archived && id === sessionId) {
-      setItems([]);
-      setStreaming("");
-      setTodo([]);
-      setRunning(false);
-      setSessionId(newId());
-    }
-  };
-  const deleteConversation = async (id: string) => {
-    const res = await deleteSession(id);
-    if (!res.ok) return;
-    refreshSessions();
-    if (id === sessionId) {
-      setItems([]);
-      setStreaming("");
-      setTodo([]);
-      setRunning(false);
-      setSessionId(newId());
-    }
-  };
-
   // "Run now": prepare a manual run, open its session, and auto-send the task so the agent
   // runs LIVE in the main view; finalize it in history once the first turn finishes.
   const openRunSession = (
@@ -1179,56 +1124,12 @@ function VegapunkApp() {
         />
       )}
       <Sidebar
-        agent={agent}
-        workspace={workspace || ""}
-        surfaces={surfaces}
-        sessions={sessions}
-        projects={projects}
-        activeSession={sessionId}
-        onSwitchAgent={switchAgent}
-        onNewSession={startNewSession}
-        onSelectSession={selectSession}
-        onNewProject={newProject}
-        onRenameSession={renameConversation}
-        onDeleteSession={deleteConversation}
-        onArchiveSession={toggleArchived}
-        onTogglePin={togglePinned}
-        onManage={() => openSettings("appearance")}
-        onOpenPersona={(id) => {
-          openPersona(id, "session");
-        }}
-        onManagePersonas={() => openSettings("personas")}
-        onOpenScheduled={() => setSurface("scheduled")}
-        onOpenYouTube={() => setSurface("youtube")}
-        onOpenAutomation={(id) => {
-          setScheduledOpenId(id);
-          setSurface("scheduled");
-        }}
-        onOpenIntegrations={() => setSurface("integrations")}
-        onOpenAudit={() => setSurface("audit")}
-        onOpenInbox={() => setSurface("inbox")}
-        onOpenSkillsManager={() => setSurface("skills-manager")}
-        onOpenAgentsMd={() => {
-          setAgentsMdTarget(null);
-          setSurface("agents-md");
-        }}
-        onOpenDiscovery={() => setSurface("discovery")}
-        onOpenTranslation={() => setSurface("translation")}
+        onOpenSkillBank={() => setSurface("skill-bank")}
         onOpenCamera={() => setSurface("camera")}
         onOpenG1Monitor={() => setSurface("g1-monitor")}
-        onOpenEmbodied={() => setSurface("embodied")}
-        scheduledActive={surface === "scheduled"}
-        youtubeActive={surface === "youtube"}
-        discoveryActive={surface === "discovery"}
-        translationActive={surface === "translation"}
         cameraActive={surface === "camera"}
         g1MonitorActive={surface === "g1-monitor"}
-        embodiedActive={surface === "embodied"}
-        integrationsActive={surface === "integrations"}
-        auditActive={surface === "audit"}
-        inboxActive={surface === "inbox"}
-        skillsManagerActive={surface === "skills-manager"}
-        agentsMdActive={surface === "agents-md" || surface === "agents-md-editor"}
+        skillBankActive={surface === "skill-bank"}
         collapsed={navCollapsed}
         onCollapse={toggleNav}
         onPeekLeave={() => setNavPeek(false)}
@@ -1267,8 +1168,8 @@ function VegapunkApp() {
           }
           onOpenIntegrations={() => setSurface("integrations")}
         />
-      ) : surface === "skills-manager" ? (
-        <SkillsManagerWorkspace />
+      ) : surface === "skill-bank" ? (
+        <RobotSkillBankWorkspace />
       ) : surface === "agents-md-editor" && agentsMdTarget ? (
         <AgentsMdEditorWorkspace
           rootPath={agentsMdTarget.rootPath}

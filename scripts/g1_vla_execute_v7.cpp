@@ -1,9 +1,10 @@
-// Operator-authorized full G1 + BrainCo execution for one immutable 25x26 VLA plan.
+// Historical G1 + BrainCo VLA plan verifier.
 //
-// This is the fast, supervised full-trajectory path. It retains only protocol
-// integrity checks (fresh CRC-valid state, exclusive rt/arm_sdk authority,
-// immutable plan digest, and mandatory authority release); it deliberately
-// does not impose P0's small-displacement or absolute torque gates.
+// V10 sent absolute hand targets without observing the live hand state or
+// generating a continuous hand transition.  It is therefore permanently
+// dry-run-only.  A replacement executor must consume the state-anchored
+// 26-channel trajectory and simulation-admission artifacts; this file must
+// never create a physical command publisher.
 #include <algorithm>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -123,13 +124,17 @@ Args Parse(int argc, char** argv) {
     else throw std::runtime_error("invalid V7 argument: " + value);
   }
   if (args.network.empty() || args.plan.empty()) throw std::runtime_error("network interface and action plan are required");
-  if (args.execute && args.authorization != kAuthorization) throw std::runtime_error("full execution authorization is absent or invalid");
+  if (args.execute) {
+    throw std::runtime_error(
+        "physical VLA execution is disabled: V10 lacks a live-hand "
+        "feedback/transition adapter and simulation admission");
+  }
   if (!args.execute && !args.authorization.empty()) throw std::runtime_error("authorization requires --execute");
   const int probe_count = static_cast<int>(args.publisher_probe_only) + static_cast<int>(args.zero_authority_probe_only) + static_cast<int>(args.authority_hold_probe_only) + static_cast<int>(args.all_publishers_probe_only);
   if (args.execute && probe_count != 0) throw std::runtime_error("a probe cannot execute an action");
   if (probe_count > 1) throw std::runtime_error("only one probe mode may be selected");
-  if (probe_count != 0 || (args.execute && !args.relative_execute)) {
-    throw std::runtime_error("raw absolute-pose execution is disabled pending calibrated relative control");
+  if (probe_count != 0) {
+    throw std::runtime_error("the historical V10 verifier supports dry-run only");
   }
   if (args.relative_execute && !args.execute) throw std::runtime_error("--relative-execute requires --execute");
   return args;

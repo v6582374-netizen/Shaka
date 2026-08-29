@@ -5,8 +5,6 @@ import { Skills } from "@skills-manager/pages/Skills";
 import { Tools } from "@skills-manager/pages/Tools";
 import { Settings } from "@skills-manager/pages/Settings";
 import { EditorPage, type EditorMode } from "@skills-manager/pages/Editor";
-import { Welcome } from "@skills-manager/pages/Welcome";
-import { useInitialization } from "@skills-manager/hooks/useInitialization";
 import { ThemeProvider } from "@skills-manager/hooks/useTheme";
 import { SkillTranslationProvider } from "@skills-manager/hooks/useSkillTranslation";
 import { I18nProvider, Language } from "@skills-manager/i18n";
@@ -40,25 +38,12 @@ function GlobalShortcuts({ onOpenPalette }: { onOpenPalette: () => void }) {
 }
 
 function StandardApp() {
-  const { isInitialized, isLoading: initLoading, markInitialized } = useInitialization();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { toasts, removeToast } = useToast();
 
   // Skills Manager follows the Desktop shell's current static English UI.
   // Local Skill content translation still receives an explicit target language at operation time.
   const language: Language = "en";
-
-  if (initLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!isInitialized) {
-    return <ThemeProvider><I18nProvider language={language}><Welcome onComplete={markInitialized} /></I18nProvider></ThemeProvider>;
-  }
 
   return <ThemeProvider><I18nProvider language={language}>
     <MemoryRouter>

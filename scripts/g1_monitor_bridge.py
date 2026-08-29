@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Serve a read-only G1 monitoring snapshot to the operator console.
+"""Serve read-only G1 monitoring snapshots and camera signalling to the operator console.
 
 The process creates DDS DataReaders, a DDS built-in publication reader, and
 ZeroMQ SUB sockets only. It has no DDS command writer, no Unitree client, and
 no actuator or configuration path. It listens on loopback by default so Vite or
-the existing local sidecar can proxy its one JSON endpoint safely.
+the existing local sidecar can proxy its read-only monitor and camera-signalling endpoints safely.
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import logging
 import signal
@@ -21,7 +22,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import PurePosixPath
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from record_evaluator_episode import (
     CAMERAS,
@@ -35,12 +36,75 @@ DEFAULT_COMMAND_TOPIC = "rt/lowcmd"
 STATE_LIVE_AGE_NS = 750_000_000
 BMS_LIVE_AGE_NS = 3_000_000_000
 CAMERA_LIVE_AGE_NS = 3_000_000_000
+# Fixed appliance endpoints: browser input may select a known pane, never a port.
+CAMERA_SLOT_PORTS = {"head": 60001, "leftWrist": 60002, "rightWrist": 60003}
 
 
 @dataclass(frozen=True)
 class Observed:
     received_monotonic_ns: int
     value: Any
+
+
+class CameraRelayError(RuntimeError):
+    def __init__(self, message: str, status: int = 502):
+        super().__init__(message)
+        self.status = status
+
+
+def _relay_host(raw: Any) -> str:
+    """Allow the relay to reach only a literal private-network robot address."""
+
+    host = str(raw or "").strip()
+    if not host:
+        raise CameraRelayError("no robot address was given", status=422)
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise CameraRelayError(
+            "the robot must be given as a literal address, for example 192.168.123.164",
+            status=422,
+        ) from error
+    if not (address.is_private or address.is_loopback or address.is_link_local):
+        raise CameraRelayError("only a private-network robot address can be relayed", status=422)
+    return address.compressed
+
+
+def relay_camera_offer(host: Any, slot_id: str, offer: Any) -> dict[str, str]:
+    """Perform the one browser-impossible WebRTC exchange with the appliance.
+
+    The camera certificate has no usable browser trust path. Only this signalling
+    request passes through the local bridge; the eventual media remains direct
+    browser-to-robot WebRTC.
+    """
+
+    resolved = _relay_host(host)
+    try:
+        port = CAMERA_SLOT_PORTS[slot_id]
+    except KeyError as error:
+        raise CameraRelayError(f"unknown camera {slot_id!r}", status=404) from error
+    if not isinstance(offer, Mapping) or not offer.get("sdp") or not offer.get("type"):
+        raise CameraRelayError("the offer must carry an sdp and a type", status=422)
+
+    import httpx
+
+    try:
+        with httpx.Client(verify=False, timeout=10.0) as client:
+            response = client.post(
+                f"https://{resolved}:{port}/offer",
+                json={"sdp": str(offer["sdp"]), "type": str(offer["type"])},
+            )
+    except httpx.HTTPError as error:
+        raise CameraRelayError(f"the camera at {resolved}:{port} did not answer", status=504) from error
+    if response.status_code >= 400:
+        raise CameraRelayError(f"the camera at {resolved}:{port} refused the offer ({response.status_code})", status=502)
+    try:
+        answer = response.json()
+    except ValueError as error:
+        raise CameraRelayError(f"the camera at {resolved}:{port} did not return an answer", status=502) from error
+    if not isinstance(answer, Mapping) or not answer.get("sdp"):
+        raise CameraRelayError(f"the camera at {resolved}:{port} did not return an answer", status=502)
+    return {"sdp": str(answer["sdp"]), "type": str(answer.get("type") or "answer")}
 
 
 def _state_for_age(age_ns: int | None, maximum_age_ns: int) -> str:
@@ -337,6 +401,26 @@ class MonitorHandler(BaseHTTPRequestHandler):
         else:
             self._json(HTTPStatus.NOT_FOUND, {"detail": "not found"})
 
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        path = PurePosixPath(self.path.split("?", 1)[0]).as_posix()
+        prefix = "/v1/embodied/cameras/"
+        if not (path.startswith(prefix) and path.endswith("/offer")):
+            self._json(HTTPStatus.NOT_FOUND, {"detail": "not found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 1_000_000:
+                raise ValueError("camera offer body is invalid")
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise ValueError("camera offer body is invalid")
+            slot_id = path.removeprefix(prefix).removesuffix("/offer").strip("/")
+            self._json(HTTPStatus.OK, relay_camera_offer(body.get("host"), slot_id, body.get("offer")))
+        except CameraRelayError as error:
+            self._json(HTTPStatus(error.status), {"detail": str(error)})
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"detail": "camera offer body is invalid"})
+
     @staticmethod
     def _empty_shell_payload(path: str) -> dict[str, Any] | None:
         if path == "/v1/personas":
@@ -372,7 +456,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:1420")
         self.end_headers()
 

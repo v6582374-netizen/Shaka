@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Shaka 整体架构体系：具身技能获取、验证与资产化",
+    "locale": "zh-CN",
+    "output": "shaka-system-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/v6582374-netizen/Shaka",
+      "revision": "e1dc329738eded54b2afa4540e95148c80d85517"
+    },
+    "viewBox": [1120, 500]
+  },
+  "components": [
+    {
+      "id": "human",
+      "type": "external",
+      "label": "人类任务与预算边界",
+      "sublabel": "任务合同 · 真机预算 · 最终确认",
+      "tag": "最小参与",
+      "pos": [20, 100],
+      "size": [145, 68],
+      "sources": [
+        { "path": "CONTEXT.md", "line": 23, "label": "physical autoresearch" },
+        { "path": "docs/adr/0002-reach-first-success-through-one-vertical-slice.md", "line": 15, "label": "预算内研究" }
+      ]
+    },
+    {
+      "id": "mission",
+      "type": "frontend",
+      "label": "Mission Control",
+      "sublabel": "AI 编排 · 假设 · 决策；无电机权",
+      "tag": "部分实现",
+      "pos": [190, 100],
+      "size": [155, 68],
+      "sources": [
+        { "path": "apps/operator-console/src/api.ts", "line": 3308, "label": "控制台运行请求" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 137, "label": "循环中枢" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 147, "label": "Orchestrator" }
+      ]
+    },
+    {
+      "id": "candidate",
+      "type": "cloud",
+      "label": "候选工厂与候选账本",
+      "sublabel": "program · policy · VLA · 单一假设",
+      "tag": "部分实现",
+      "pos": [370, 100],
+      "size": [155, 68],
+      "sources": [
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 160, "label": "候选工厂" },
+        { "path": "scripts/run_unifolm_vla_invocation_candidate.py", "line": 249, "label": "固定 VLA 候选" }
+      ]
+    },
+    {
+      "id": "gates",
+      "type": "security",
+      "label": "准入与晋级门",
+      "sublabel": "静态 · 回放 · 仿真 · zero-write",
+      "tag": "部分实现",
+      "pos": [550, 100],
+      "size": [155, 68],
+      "sources": [
+        { "path": "scripts/validate_g1_vla_action_plan.py", "line": 176, "label": "静态准入" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 239, "label": "MuJoCo 预检" },
+        { "path": "docs/adr/0002-reach-first-success-through-one-vertical-slice.md", "line": 13, "label": "zero-write 门" }
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "单次调用运行器",
+      "sublabel": "就绪 · 记录 · 执行 · 评估 · 复位",
+      "tag": "已实现",
+      "pos": [730, 100],
+      "size": [155, 68],
+      "sources": [
+        { "path": "scripts/run_single_invocation.py", "line": 1164, "label": "run()" },
+        { "path": "docs/adr/0002-reach-first-success-through-one-vertical-slice.md", "line": 12, "label": "编排顺序" }
+      ]
+    },
+    {
+      "id": "control",
+      "type": "security",
+      "label": "唯一控制入口 + 硬件保护",
+      "sublabel": "短时写权 · 动态守护 · fail-closed",
+      "tag": "未闭合",
+      "pos": [910, 100],
+      "size": [175, 68],
+      "sources": [
+        { "path": "CONTEXT.md", "line": 39, "label": "唯一控制入口" },
+        { "path": "scripts/g1_vla_robot_side_guardian.py", "line": 360, "label": "RobotSideGuardian" },
+        { "path": "docs/operations/g1-vla-canary-20260827.md", "line": 45, "label": "部署缺口" }
+      ]
+    },
+    {
+      "id": "robot",
+      "type": "external",
+      "label": "Unitree G1 物理世界",
+      "sublabel": "G1 + BrainCo + 3 相机 / 4 视角",
+      "tag": "外部依赖",
+      "pos": [910, 290],
+      "size": [175, 68],
+      "sources": [
+        { "path": "docs/operations/single-invocation-runner.md", "line": 31, "label": "真实硬件源" }
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "EpisodeArtifact 回合库",
+      "sublabel": "四流血统 · 状态 · 视频 · 安全事件",
+      "tag": "已实现核心",
+      "pos": [730, 290],
+      "size": [155, 68],
+      "sources": [
+        { "path": "scripts/record_evaluator_episode.py", "line": 730, "label": "证据记录" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 265, "label": "EpisodeArtifact" }
+      ]
+    },
+    {
+      "id": "evaluator",
+      "type": "external",
+      "label": "独立真值发生器",
+      "sublabel": "VLM · 完整性规则 · 五态结果",
+      "tag": "已实现",
+      "pos": [550, 290],
+      "size": [155, 68],
+      "sources": [
+        { "path": "scripts/evaluate_episode_with_vlm.py", "line": 443, "label": "evaluate_evidence()" },
+        { "path": "CONTEXT.md", "line": 87, "label": "独立评估器" }
+      ]
+    },
+    {
+      "id": "analysis",
+      "type": "backend",
+      "label": "失败路由与实验选择器",
+      "sublabel": "八类归因 · 便宜证据优先 · 回退",
+      "tag": "目标态",
+      "pos": [370, 290],
+      "size": [155, 68],
+      "sources": [
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 289, "label": "八类失败路由" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 304, "label": "实验选择器" }
+      ]
+    },
+    {
+      "id": "skills",
+      "type": "database",
+      "label": "Installed Skill 资产化",
+      "sublabel": "fresh-reset · 回归 · 回滚",
+      "tag": "目标态",
+      "pos": [20, 290],
+      "size": [155, 68],
+      "sources": [
+        { "path": "CONTEXT.md", "line": 15, "label": "installed skill" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 218, "label": "技能包" },
+        { "path": "self-evolving-embodied-intelligence-architectural-blueprint.md", "line": 365, "label": "安装与复利" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "获取面：允许改候选与决策，永远无电机权",
+      "wraps": ["mission", "candidate", "analysis"],
+      "pad": 14
+    },
+    {
+      "kind": "security-group",
+      "label": "执行面：不可自我改写，权限短时且可撤销",
+      "wraps": ["gates", "runner", "control"],
+      "pad": 14
+    },
+    {
+      "kind": "region",
+      "label": "外部物理边界",
+      "wraps": ["robot"],
+      "pad": 14
+    },
+    {
+      "kind": "security-group",
+      "label": "独立真值边界：候选不可读取或改写",
+      "wraps": ["evaluator"],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    { "id": "s1", "from": "human", "to": "mission", "label": "任务 + 总预算", "variant": "emphasis", "width": 2, "labelDy": 58 },
+    { "id": "s2", "from": "mission", "to": "candidate", "label": "可证伪假设", "variant": "emphasis", "width": 2, "labelAt": [420, 184] },
+    { "id": "s3", "from": "candidate", "to": "gates", "label": "候选包 + digest", "variant": "security", "width": 2, "labelDy": 58 },
+    { "id": "s4", "from": "gates", "to": "runner", "label": "admitted candidate", "variant": "emphasis", "width": 2, "labelDy": 58 },
+    { "id": "s5", "from": "runner", "to": "control", "label": "单次调用授权", "variant": "security", "width": 2, "labelDy": 58 },
+    { "id": "s6", "from": "control", "to": "robot", "label": "唯一执行通道", "variant": "security", "width": 2, "labelAt": [1028, 182] },
+    { "id": "s7", "from": "robot", "to": "evidence", "label": "动作后果 + 遥测", "variant": "emphasis", "width": 2, "labelDy": 58 },
+    { "id": "s8", "from": "evidence", "to": "evaluator", "label": "完整证据", "variant": "security", "width": 2, "labelDy": 58 },
+    { "id": "s9", "from": "evaluator", "to": "analysis", "label": "五态结果 + 事实", "variant": "emphasis", "width": 2, "labelDy": 58 },
+    { "id": "s10", "from": "analysis", "to": "mission", "label": "下一实验 / unknown", "variant": "dashed", "width": 2 },
+    { "id": "s11", "from": "analysis", "to": "skills", "label": "fresh-reset 验收", "variant": "dashed", "width": 2 }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "现实状态分层",
+      "items": [
+        "已实现：单次调用运行器、真实观测与回合记录、zero-write 纵向切片、独立 VLM 评估。",
+        "部分/目标：通用候选工厂、自动实验闭环、已部署 Guardian、Installed Skill 验收与回滚。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "三平面权限代数",
+      "items": [
+        "获取面可改代码、模型、配置和假设，但 LLM、训练器、仿真器永远无电机权。",
+        "执行面 fail-closed；持久面以文件目录 + git append-only，候选不能改写评估结果。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "蓝图经 ADR 裁剪后的体系",
+      "items": [
+        "首版不建 Redis、数据库、消息总线或常驻工作流；主攻可归因的程序候选，VLA 是候选之一。",
+        "外部依赖：Unitree DDS、BrainCo/相机 ZeroMQ、MuJoCo G1 本体、UniFoLM/CUDA、OpenAI 或 Codex。"
+      ]
+    }
+  ]
+}

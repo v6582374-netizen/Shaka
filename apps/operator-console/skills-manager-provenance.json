@@ -39,6 +39,25 @@
       "upstream_sync_strategy": "Reapply the BrowserRouter-to-MemoryRouter substitution after each upstream refresh."
     },
     {
+      "id": "no-first-run-skills-wizard",
+      "upstream_scope": [
+        "src/pages/Welcome.tsx",
+        "src/components/welcome/**/*",
+        "src/hooks/useInitialization.ts"
+      ],
+      "integrated_scope": [
+        "src/features/skills-manager/App.tsx"
+      ],
+      "reason": "The embedded Skills workspace must open directly to its inventory instead of blocking first use with setup steps.",
+      "behavioral_impact": "The retained Skills, Tools, Settings, and Editor UI renders without reading or writing the upstream initialization state.",
+      "regression_coverage": [
+        "npm run build",
+        "npm run skills-manager:test",
+        "npm run skills-manager:verify"
+      ],
+      "upstream_sync_strategy": "Keep the onboarding sources retired unless the host explicitly restores a first-run flow."
+    },
+    {
       "id": "workspace-scoped-theme",
       "upstream_scope": [
         "src/hooks/useTheme.tsx document.documentElement mutations"
@@ -240,7 +259,7 @@
       "integrated_files": [
         {
           "path": "package-lock.json",
-          "sha256": "4ed3865a7cf494a07fdca3c153a768c1d26907acdfd4b2c622e3001be6178f86"
+          "sha256": "5898d789c172ab1dfae21ad48dbe3c98638028e4b7c39ada7fc876560c1ad94b"
         }
       ]
     },
@@ -257,7 +276,7 @@
       "integrated_files": [
         {
           "path": "package.json",
-          "sha256": "c01c2e0e8b7746053d35a87d64a4e2858a08fc353e48f71bb51faa9dc9b83f15"
+          "sha256": "5da6584fd632f893566fce600d572d7348a95e03d1e2527776ae6c7c1e772c4e"
         }
       ]
     },
@@ -304,7 +323,7 @@
       "integrated_files": [
         {
           "path": "src/features/skills-manager/App.tsx",
-          "sha256": "aedaae434ccc762af282cfb6e0678c85e4704c32b6eb8f311766abc362f22665"
+          "sha256": "381fedec127a2d40b133e8f5788c9f7873259397804371f1ab112dcd5ecb76ec"
         }
       ]
     },
@@ -1465,16 +1484,9 @@
       "git_blob": "20ccfd2dd9f9a2b93ef7282bb78bf89cadb5e4f2",
       "sha256": "779efa5eb6458df647818a4290117bda8181a0993d31024047239ffcaeb1abb3",
       "exact_copy": "third_party/skills-manager/src/components/welcome/DirectorySetupStep.tsx",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/components/welcome/DirectorySetupStep.tsx"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/components/welcome/DirectorySetupStep.tsx",
-          "sha256": "e988e5ddf8dc946d88db79aeb0fef3742066f9ae73c151ac40fbbe4a48f73f6a"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/components/welcome/ImportSkillsStep.tsx",
@@ -1482,16 +1494,9 @@
       "git_blob": "dde5bf7ccca939f47140cf0a71eaaf9e2c43076b",
       "sha256": "bc129fbf472d8bd2b9a69416d473758922ce745da1f974e86197a09bf7d501c4",
       "exact_copy": "third_party/skills-manager/src/components/welcome/ImportSkillsStep.tsx",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/components/welcome/ImportSkillsStep.tsx"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/components/welcome/ImportSkillsStep.tsx",
-          "sha256": "765554c92b60083296942bc0e61b1994c4757b9474036a3deb7d24eafd2e8681"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/components/welcome/ToolDetectionStep.tsx",
@@ -1499,16 +1504,9 @@
       "git_blob": "bf28603209ea9f5849e8a96697429e2396c7e862",
       "sha256": "5395e966248329ce814f0f1b5ea10622a5d3b420cac8353c8c88ab2d11245f80",
       "exact_copy": "third_party/skills-manager/src/components/welcome/ToolDetectionStep.tsx",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/components/welcome/ToolDetectionStep.tsx"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/components/welcome/ToolDetectionStep.tsx",
-          "sha256": "d260c49897b809c08bb8a0cf7f91401eb12caaa5e48379d046f6cb01876c30b7"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/components/welcome/WelcomeStep.tsx",
@@ -1516,16 +1514,9 @@
       "git_blob": "51d727089feb3fba4050d7f700c9a6637c996414",
       "sha256": "61f76c55aa42e1c1b07fad3615c5e5bab3da8e26af97ac5954ab7d5f7985defb",
       "exact_copy": "third_party/skills-manager/src/components/welcome/WelcomeStep.tsx",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/components/welcome/WelcomeStep.tsx"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/components/welcome/WelcomeStep.tsx",
-          "sha256": "a5abf5b62a958484bd3f36c91ff1d0f1f8edfff02471c7751793956a3c1ecd27"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/components/welcome/index.ts",
@@ -1533,16 +1524,9 @@
       "git_blob": "e8da395cebede48af6f33405da886541fa613207",
       "sha256": "544dcd46860d6b72bd3fd8dc1b93675d708c48435862f451059bbddefd1bcac2",
       "exact_copy": "third_party/skills-manager/src/components/welcome/index.ts",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/components/welcome/index.ts"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/components/welcome/index.ts",
-          "sha256": "544dcd46860d6b72bd3fd8dc1b93675d708c48435862f451059bbddefd1bcac2"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/constants/modal.ts",
@@ -1638,16 +1622,9 @@
       "git_blob": "8e636514743eef8876edb271e9f97b5e35f282bc",
       "sha256": "4b908d0abbc8c7aec9b8d00d179ed6eaab1d1a996182242360426c7f5c313a83",
       "exact_copy": "third_party/skills-manager/src/hooks/useInitialization.ts",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/hooks/useInitialization.ts"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/hooks/useInitialization.ts",
-          "sha256": "4b908d0abbc8c7aec9b8d00d179ed6eaab1d1a996182242360426c7f5c313a83"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/hooks/useSkillTranslation.tsx",
@@ -1877,16 +1854,9 @@
       "git_blob": "57849e6378d1da4400e7c3074a923bccf9805b56",
       "sha256": "d094b8890220d09e1e9f066663278f56dbd8fc0dceea9bcd684c87545f8f3ac4",
       "exact_copy": "third_party/skills-manager/src/pages/Welcome.tsx",
-      "status": "adapted-runtime-copy",
-      "integrated_paths": [
-        "src/features/skills-manager/pages/Welcome.tsx"
-      ],
-      "integrated_files": [
-        {
-          "path": "src/features/skills-manager/pages/Welcome.tsx",
-          "sha256": "ae7f6d85b24648d694fc213be8eb002b02aee3192c24e205446b3a7b725c69f3"
-        }
-      ]
+      "status": "retired-integrated-surface",
+      "integrated_paths": [],
+      "integrated_files": []
     },
     {
       "path": "src/pages/marketplace/buildMarketplaceMetaItems.test.ts",
@@ -2862,7 +2832,7 @@
       "integrated_files": [
         {
           "path": "vite.config.ts",
-          "sha256": "b2f7a851cb3c3063c887dda56de103b552e0e95802815f07daae3665f08b5b69"
+          "sha256": "2a940c6c3dc125982a522b8734e7df8092a49987500a403d19c262167fa93317"
         }
       ]
     }

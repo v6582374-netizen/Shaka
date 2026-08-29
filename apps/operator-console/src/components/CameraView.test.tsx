@@ -62,7 +62,6 @@ describe("CameraView", () => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
 
     render(<CameraView />);
-    fireEvent.change(screen.getByLabelText("Robot address"), { target: { value: "192.168.123.164" } });
     fireEvent.click(screen.getByRole("button", { name: "Start cameras" }));
 
     await waitFor(() => expect(relayCameraOffer).toHaveBeenCalledTimes(3));

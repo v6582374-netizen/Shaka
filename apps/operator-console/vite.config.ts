@@ -12,6 +12,7 @@ import path from "node:path";
 export default defineConfig(({ command }) => {
   let devToken = "";
   const sidecarTarget = process.env.VITE_COWORKER_HTTP || "http://127.0.0.1:8765";
+  const g1MonitorTarget = process.env.VITE_G1_MONITOR_HTTP || "http://127.0.0.1:8766";
   if (command === "serve") {
     const state =
       process.env.COWORKER_STATE_DIR ||
@@ -40,6 +41,11 @@ export default defineConfig(({ command }) => {
       // opened through a LAN address: the sidecar deliberately rejects arbitrary browser
       // origins, while Vite can proxy the request server-to-server to loopback.
       proxy: {
+        // The G1 monitor is intentionally a separate, read-only local process.
+        // Keep its routes ahead of the broad sidecar proxy so opening a camera
+        // never depends on an unrelated sidecar owning port 8765.
+        "/v1/embodied/cameras": { target: g1MonitorTarget, changeOrigin: true },
+        "/v1/embodied/g1/monitor": { target: g1MonitorTarget, changeOrigin: true },
         "/v1": { target: sidecarTarget, changeOrigin: true },
         "/ws": {
           target: sidecarTarget,
