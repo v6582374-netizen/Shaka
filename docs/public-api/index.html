@@ -6,16 +6,56 @@
     <meta name="description" content="Shaka public test API and technical documentation" />
     <title>Shaka · Public API</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/dark.css" />
     <style>
-      :root { --theme-color: #7157ff; --base-font-size: 16px; }
-      body { color: #232235; }
+      :root {
+        color-scheme: dark;
+        --theme-color: #4de3d0;
+        --base-font-size: 16px;
+        --night: #070b13;
+        --panel: #101722;
+        --panel-2: #151e2a;
+        --ink: #f2f7fb;
+        --muted: #9eacb9;
+        --line: rgba(164,192,216,.16);
+      }
+      html, body { background: var(--night); }
+      body {
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 78% -10%,rgba(51,119,184,.18),transparent 30%),
+          radial-gradient(circle at 6% 26%,rgba(33,132,121,.11),transparent 26%),
+          var(--night);
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: .14;
+        background-image: linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+        background-size: 52px 52px;
+        mask-image: linear-gradient(to bottom,black,transparent 72%);
+      }
       .app-name-link { font-weight: 800; letter-spacing: -.03em; }
-      .sidebar { background: #f8f7ff; }
-      .markdown-section { max-width: 940px; }
+      .sidebar { background: rgba(13,21,31,.96); border-right-color: var(--line); }
+      .sidebar ul li a { color: #b8c5d1; }
+      .sidebar ul li.active > a { color: var(--theme-color); border-right-color: var(--theme-color); }
+      .search { border-bottom-color: var(--line)!important; }
+      .search input { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; }
+      .search input::placeholder { color: #748391; }
+      .markdown-section { max-width: 940px; color: #dce6ef; }
       .markdown-section h1 { font-size: 2.4rem; letter-spacing: -.04em; }
-      .markdown-section blockquote { border-left-color: #7157ff; background: #f7f5ff; padding: 12px 18px; }
-      .demo-link { display:inline-block; padding:12px 18px; border-radius:12px; background:#171624; color:white!important; text-decoration:none; font-weight:700; }
+      .markdown-section h1, .markdown-section h2, .markdown-section h3, .markdown-section h4, .app-name-link { color: var(--ink); }
+      .markdown-section a { color: var(--theme-color); }
+      .markdown-section blockquote { border-left-color: var(--theme-color); background: rgba(77,227,208,.07); color: #c7d4df; padding: 12px 18px; }
+      .markdown-section code { color: #8feadd; background: #0b131c; }
+      .markdown-section pre { background: #0b131c; border: 1px solid var(--line); border-radius: 12px; }
+      .markdown-section table { background: var(--panel); }
+      .markdown-section th { background: var(--panel-2); color: var(--ink); }
+      .markdown-section td, .markdown-section th { border-color: var(--line); }
+      .markdown-section tr:nth-child(2n) { background: rgba(255,255,255,.025); }
+      .demo-link { display:inline-block; padding:12px 18px; border-radius:12px; background:var(--theme-color); color:#071019!important; text-decoration:none; font-weight:800; }
     </style>
   </head>
   <body>
