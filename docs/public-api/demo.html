@@ -195,7 +195,7 @@
         <p class="hero-copy">Shaka 面向一个比“完成一次动作”更长期的问题：具身智能如何在真实世界的不确定性中，保留目标与安全边界，并把每一次成功、失败和拒绝转化为下一轮可验证的行动方案。</p>
         <div class="statusline"><span>控制链已验证</span><span>任务未成功</span><span>真机反馈修订周期未闭合</span></div>
         <div class="hero-actions">
-          <a class="button primary" href="#g1">查看真机闭环证据 ↓</a>
+          <a class="button primary" href="#g1">查看真机执行/拒绝链证据 ↓</a>
           <a class="button" href="index.html">进入 API 手册 ↗</a>
           <a class="button" href="https://github.com/v6582374-netizen/Shaka">查看源码 ↗</a>
         </div>
@@ -232,7 +232,7 @@
       <div class="shell">
         <div class="section-head">
           <div><div class="eyebrow">G1 physical canary</div><h2>真机链路已打通，<br />效果仍未过关</h2></div>
-          <p class="section-intro">Shaka 已完成从真实感知、状态读取、命令下发到安全判定的 G1 端到端链路验证。V7、V8 都触达真实控制链，但绝对位姿 VLA 输出尚不能适应实时力矩反馈，因此被安全门主动中止。</p>
+          <p class="section-intro">Shaka 已完成从真实感知、状态读取、命令下发到安全判定的 G1 端到端链路验证。两次监督物理尝试都触达真实控制链，但绝对位姿 VLA 输出尚不能适应实时力矩反馈，因此被安全门主动中止。</p>
         </div>
         <div class="evidence-grid">
           <article class="evidence-card large">
@@ -241,8 +241,8 @@
             <h3>真实控制链与安全拒绝机制有效</h3>
             <p>辅助主机经真实网络与控制主题进入机器人，BrainCo 接收左右手新鲜命令流；系统没有把“命令到达”误写成“任务成功”。</p>
             <div class="attempts">
-              <div class="attempt"><strong>V7</strong><span>轨迹进入真实机器人后触发上身力矩安全门</span><em>4 N·m 门槛中止</em></div>
-              <div class="attempt"><strong>V8</strong><span>右肩滚转通道出现显著实时力矩</span><em>16.625 &gt; 12.5 N·m</em></div>
+              <div class="attempt"><strong>第一次监督尝试</strong><span>轨迹进入真实机器人后触发上身力矩安全门</span><em>4 N·m 门槛中止</em></div>
+              <div class="attempt"><strong>第二次监督尝试</strong><span>右肩滚转通道出现显著实时力矩</span><em>16.625 &gt; 12.5 N·m</em></div>
             </div>
           </article>
           <article class="evidence-card">
