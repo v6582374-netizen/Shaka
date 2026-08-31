@@ -1,0 +1,77 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Shaka Submission API",
+    "version": "2026-08-31",
+    "description": "Hardware-independent public contract for the Shaka embodied skill-acquisition lifecycle. Simulation responses are explicitly labeled and are not physical G1 evidence."
+  },
+  "servers": [
+    {"url": "http://127.0.0.1:8787", "description": "Zero-dependency local server"}
+  ],
+  "paths": {
+    "/v1/health": {
+      "get": {"summary": "Health check", "responses": {"200": {"description": "Healthy"}}}
+    },
+    "/v1/capabilities": {
+      "get": {"summary": "Discover tasks, modes and claim boundaries", "responses": {"200": {"description": "Capabilities"}}}
+    },
+    "/v1/invocations": {
+      "post": {
+        "summary": "Run one formal single-attempt invocation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/InvocationRequest"},
+              "examples": {
+                "nominal": {"value": {"mode": "simulation", "scenario": "nominal", "seed": 7}},
+                "shifted": {"value": {"mode": "simulation", "scenario": "shifted_base", "seed": 11, "initial_state": {"base_x_m": 0.18, "base_y_m": -0.08, "base_yaw_deg": 12}}},
+                "refusal": {"value": {"mode": "simulation", "scenario": "guardian_absent", "guardian_present": false}}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Completed formal invocation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InvocationResult"}}}},
+          "409": {"description": "Connected hardware mode is unavailable"},
+          "422": {"description": "Contract validation failed"}
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "InvocationRequest": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string", "const": "g1-yellow-button-contact-v1"},
+          "instruction": {"type": "string", "maxLength": 500},
+          "mode": {"type": "string", "const": "simulation", "default": "simulation"},
+          "scenario": {"type": "string", "enum": ["nominal", "shifted_base", "target_occluded", "guardian_absent"], "default": "nominal"},
+          "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "default": 7},
+          "guardian_present": {"type": "boolean"},
+          "initial_state": {
+            "type": "object",
+            "properties": {
+              "base_x_m": {"type": "number", "minimum": -0.35, "maximum": 0.35},
+              "base_y_m": {"type": "number", "minimum": -0.35, "maximum": 0.35},
+              "base_yaw_deg": {"type": "number", "minimum": -25, "maximum": 25}
+            }
+          }
+        }
+      },
+      "InvocationResult": {
+        "type": "object",
+        "required": ["run_id", "task_result", "execution", "trace", "evaluation", "evidence_digest"],
+        "properties": {
+          "run_id": {"type": "string"},
+          "task_result": {"type": "string", "enum": ["succeeded", "failed", "indeterminate", "aborted", "abstained"]},
+          "execution": {"type": "object", "properties": {"physical_execution": {"type": "boolean", "const": false}, "writes_to_robot": {"type": "integer", "const": 0}}},
+          "trace": {"type": "array", "items": {"type": "object"}},
+          "evaluation": {"type": "object"},
+          "evidence_digest": {"type": "string"}
+        }
+      }
+    }
+  }
+}

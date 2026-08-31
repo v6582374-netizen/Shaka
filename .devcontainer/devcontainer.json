@@ -1,0 +1,12 @@
+{
+  "name": "Shaka Submission API",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "forwardPorts": [8787],
+  "portsAttributes": {
+    "8787": {
+      "label": "Shaka interactive API",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postStartCommand": "nohup python3 -m submission_api.server --host 0.0.0.0 --port 8787 >/tmp/shaka-submission-api.log 2>&1 &"
+}

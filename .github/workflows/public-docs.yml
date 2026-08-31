@@ -1,0 +1,42 @@
+name: Public submission documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/public-docs.yml"
+      - "docs/public-api/**"
+      - "submission_api/openapi.json"
+      - "deliverables/*.pdf"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Assemble public site
+        run: |
+          mkdir -p _site/paper
+          cp -R docs/public-api/. _site/
+          cp submission_api/openapi.json _site/openapi.json
+          cp deliverables/*.pdf _site/paper/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

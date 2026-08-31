@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Shaka public test API and technical documentation" />
+    <title>Shaka · Public API</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css" />
+    <style>
+      :root { --theme-color: #7157ff; --base-font-size: 16px; }
+      body { color: #232235; }
+      .app-name-link { font-weight: 800; letter-spacing: -.03em; }
+      .sidebar { background: #f8f7ff; }
+      .markdown-section { max-width: 940px; }
+      .markdown-section h1 { font-size: 2.4rem; letter-spacing: -.04em; }
+      .markdown-section blockquote { border-left-color: #7157ff; background: #f7f5ff; padding: 12px 18px; }
+      .demo-link { display:inline-block; padding:12px 18px; border-radius:12px; background:#171624; color:white!important; text-decoration:none; font-weight:700; }
+    </style>
+  </head>
+  <body>
+    <div id="app">正在加载 Shaka 文档…</div>
+    <script>
+      window.$docsify = {
+        name: 'Shaka API',
+        repo: 'v6582374-netizen/Shaka',
+        loadSidebar: true,
+        subMaxLevel: 2,
+        auto2top: true,
+        homepage: 'README.md',
+        search: { placeholder: '搜索文档', noData: '没有结果' },
+        copyCode: { buttonText: '复制', errorText: '失败', successText: '已复制' }
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2/dist/docsify-copy-code.min.js"></script>
+  </body>
+</html>
