@@ -1,10 +1,8 @@
 # 5 分钟快速开始
 
-## 方案 A：浏览器交互
+本页只处理 API 调用。若要先理解项目愿景与真机成果，请打开 [Shaka Evolution Observatory](demo.html)。
 
-打开 [交互测试台](demo.html)。若页面由本地 API 服务打开，地址保持“当前地址”即可；若从 GitHub Pages 打开，将 API 地址改为本机或 Codespaces 转发地址。
-
-## 方案 B：本地 API
+## 1. 启动服务
 
 只需要 Python 3.11+，无须安装依赖：
 
@@ -12,24 +10,13 @@
 python3 -m submission_api.server --host 127.0.0.1 --port 8787
 ```
 
-健康检查：
+## 2. 检查服务
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/health
 ```
 
-读取或重放已留存的 Qwen 两轮案例：
-
-```bash
-curl -sS http://127.0.0.1:8787/v1/qwen/evidence
-curl -sS http://127.0.0.1:8787/v1/qwen/replay \
-  -H 'Content-Type: application/json' -d '{}'
-python3 scripts/verify_qwen_feedback_cycle.py
-```
-
-最后一条命令不启动服务、不联网、不写文件。
-
-发起一次调用：
+## 3. 运行一个完整调用
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/invocations \
@@ -50,7 +37,26 @@ curl -sS http://127.0.0.1:8787/v1/invocations \
 JSON
 ```
 
-## 方案 C：云端零安装
+常用确定性场景：
+
+- `nominal`：标准通过路径；
+- `shifted_base`：验证初始基座位姿的输入传播；
+- `target_occluded`：目标不可见；
+- `guardian_absent`：保护条件缺失，预期拒绝。
+
+## 4. 读取与重放 Qwen 案例
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/qwen/evidence
+curl -sS http://127.0.0.1:8787/v1/qwen/replay \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+python3 scripts/verify_qwen_feedback_cycle.py
+```
+
+重放使用仓库中已留存的输入与确定性程序，不会再次调用 Qwen，也不会写入机器人。最后一条验证命令不启动服务、不联网、不写文件。
+
+## 5. 云端零安装
 
 点击 [创建 Codespace](https://codespaces.new/v6582374-netizen/Shaka?quickstart=1)。容器启动后会自动运行 API 并打开转发后的 8787 端口。
 
