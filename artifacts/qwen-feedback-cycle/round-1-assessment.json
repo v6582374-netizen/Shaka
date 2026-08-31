@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "localization_confidence": false,
+    "minimum_clearance": true,
+    "peak_joint_velocity": false,
+    "predicted_contact_error": false,
+    "task_succeeded": true
+  },
+  "claim_boundary": "deterministic_contract_simulation_only",
+  "decision": "adjust",
+  "deterministic_program_decision": true,
+  "frozen_success_criteria": {
+    "max_peak_joint_velocity_ratio": 0.6,
+    "max_predicted_contact_error_mm": 3.0,
+    "min_clearance_mm": 40.0,
+    "min_localization_confidence": 0.95
+  },
+  "model_did_not_assign_task_result": true,
+  "observed_metrics": {
+    "minimum_clearance_mm": 40.27,
+    "peak_joint_velocity_ratio": 0.658,
+    "predicted_contact_error_mm": 3.19,
+    "retreat_distance_mm": 90.41,
+    "target_localization_confidence": 0.943
+  },
+  "plan_id": "yellow_button_round_1",
+  "run_id": "sim-0be3f41bac05afd1"
+}

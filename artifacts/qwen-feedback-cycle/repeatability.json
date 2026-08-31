@@ -1,0 +1,32 @@
+{
+  "round_one": {
+    "decision_counts": {
+      "accept": 0,
+      "adjust": 20
+    },
+    "interpretation_boundary": "Repeated equality establishes deterministic software behavior only; it is not statistical robustness or physical repeatability evidence.",
+    "repetitions": 20,
+    "unique_metric_vectors": 1,
+    "unique_request_digests": [
+      "0be3f41bac05afd15460c24eb28fbf15dd28a087d982bcb3f4ce0f807eeb7d95"
+    ],
+    "unique_run_ids": [
+      "sim-0be3f41bac05afd1"
+    ]
+  },
+  "round_two": {
+    "decision_counts": {
+      "accept": 20,
+      "adjust": 0
+    },
+    "interpretation_boundary": "Repeated equality establishes deterministic software behavior only; it is not statistical robustness or physical repeatability evidence.",
+    "repetitions": 20,
+    "unique_metric_vectors": 1,
+    "unique_request_digests": [
+      "a390754c41873cb3e81c2d2e7795a275480ef335864da58e39c1966965d1348e"
+    ],
+    "unique_run_ids": [
+      "sim-a390754c41873cb3"
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "claim_boundary": "deterministic_contract_simulation_only",
+  "cycle_id": "qwen-cycle-0be3f41b-a390754c",
+  "files": [
+    {
+      "path": "cycle-summary.json",
+      "sha256": "a51013439bd1716994a9bfe1fc5136eefd8b6abdebca8d3cba81d1e7eaf5b1b6",
+      "size_bytes": 4758
+    },
+    {
+      "path": "failed-cycle-disclosure.json",
+      "sha256": "58e6f7e2ac215dcc92ecffb1b80a16d4dd17fedd59acd1c1317ed53cc93acbae",
+      "size_bytes": 1699
+    },
+    {
+      "path": "method-comparison.json",
+      "sha256": "d7c7e2a15943ce7722828d515c7c89b3976f5c1c2d9e4fdb3651a2d5e4ebc6b2",
+      "size_bytes": 3344
+    },
+    {
+      "path": "parameter-space-audit.json",
+      "sha256": "ad107d24c198fdc86663ca3e1ef4534da144104a01a5dc81755c5b00602a3873",
+      "size_bytes": 3049
+    },
+    {
+      "path": "plan-diff.json",
+      "sha256": "abbca6457f470ac9b1738e0382e00e6da8f903675dce1cd0f173134373a4f485",
+      "size_bytes": 2232
+    },
+    {
+      "path": "qwen-attempts.json",
+      "sha256": "18f5f9b87b8c92348d928354b5a8d44b52c0647b89593f135a4bef84ed6d9074",
+      "size_bytes": 8254
+    },
+    {
+      "path": "qwen-context.json",
+      "sha256": "1c5acd20f58089ce3768bd7ccd80b2ca05be04ceabccdaca2de557c2f8a9e18d",
+      "size_bytes": 10259
+    },
+    {
+      "path": "qwen-receipts.json",
+      "sha256": "5239fa510409714ef302814dc413efd904298a94db097f59d2619e381f557e34",
+      "size_bytes": 1538
+    },
+    {
+      "path": "repeatability.json",
+      "sha256": "e6fcda711a5651bf4a6770a3e59985a7410f97235a495dd004704581b70b7410",
+      "size_bytes": 981
+    },
+    {
+      "path": "round-1-assessment.json",
+      "sha256": "9d38040d5c7452885123631d52d957349ce0d4428c5becdb408154fd415b073f",
+      "size_bytes": 849
+    },
+    {
+      "path": "round-1-plan.json",
+      "sha256": "b755411b57dd61abc34f5d8b2791ce78ef669fe3469ca09710304fddea1e374b",
+      "size_bytes": 1695
+    },
+    {
+      "path": "round-1-result.json",
+      "sha256": "e1f3f1df20fb36207659b8784a53a26f19451ae707080df9454dee89aa96b154",
+      "size_bytes": 3915
+    },
+    {
+      "path": "round-2-assessment.json",
+      "sha256": "99e78afeb9659eb70f87669a175fe71281a37f8db334e77e0ee2609db4500bf1",
+      "size_bytes": 846
+    },
+    {
+      "path": "round-2-plan.json",
+      "sha256": "551dbc39d1a1c1a2ec5d9fb9dd677cfe87c908ea82f226ff8de95a93ea228bf6",
+      "size_bytes": 2950
+    },
+    {
+      "path": "round-2-result.json",
+      "sha256": "ee3ec0945b9aa4b09d53423478d2cd7d7f9014affd0e1b6f809011d8ea6fef89",
+      "size_bytes": 3934
+    }
+  ],
+  "schema_version": 1
+}

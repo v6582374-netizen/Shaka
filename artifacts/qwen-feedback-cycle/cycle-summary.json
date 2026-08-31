@@ -1,0 +1,191 @@
+{
+  "action_plan_changed": true,
+  "claim_boundary": "deterministic_contract_simulation_only",
+  "context_sha256": "95994a1d9f9f6c77d23d330c6b171ccbc00b8257b0ef661ff879a7bc73663864",
+  "credential_recorded": false,
+  "cycle_id": "qwen-cycle-0be3f41b-a390754c",
+  "generated_at": "2026-08-31T06:41:01.403983Z",
+  "measured_change": {
+    "localization_confidence_delta": 0.015,
+    "minimum_clearance_mm_delta": 0.6,
+    "predicted_contact_error_mm_delta": -0.2
+  },
+  "model": "qwen3-max",
+  "physical_execution": false,
+  "provider": "Alibaba Cloud Model Studio (Bailian/DashScope)",
+  "qwen_request_ids": [
+    "chatcmpl-c7dd766d-e698-9239-b713-423b7d26f2cb",
+    "chatcmpl-00e923b3-6b35-970b-97bb-7dd390696bc9"
+  ],
+  "qwen_total_tokens": 3490,
+  "round_one": {
+    "action_plan": [
+      {
+        "duration_ms": 250,
+        "right_arm_delta_rad": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "waypoint": "observe"
+      },
+      {
+        "duration_ms": 900,
+        "right_arm_delta_rad": [
+          0.04,
+          -0.11,
+          0.08,
+          -0.16,
+          0.03,
+          0.1,
+          -0.02
+        ],
+        "waypoint": "pre_contact"
+      },
+      {
+        "duration_ms": 420,
+        "right_arm_delta_rad": [
+          0.01,
+          -0.03,
+          0.02,
+          -0.04,
+          0.0,
+          0.02,
+          0.0
+        ],
+        "waypoint": "contact"
+      },
+      {
+        "duration_ms": 650,
+        "right_arm_delta_rad": [
+          -0.02,
+          0.08,
+          -0.06,
+          0.11,
+          -0.02,
+          -0.07,
+          0.01
+        ],
+        "waypoint": "retreat"
+      }
+    ],
+    "decision": "adjust",
+    "metrics": {
+      "minimum_clearance_mm": 40.27,
+      "peak_joint_velocity_ratio": 0.658,
+      "predicted_contact_error_mm": 3.19,
+      "retreat_distance_mm": 90.41,
+      "target_localization_confidence": 0.943
+    },
+    "plan_id": "yellow_button_round_1",
+    "request": {
+      "guardian_present": true,
+      "initial_state": {
+        "base_x_m": 0.18,
+        "base_y_m": -0.08,
+        "base_yaw_deg": 12.0
+      },
+      "instruction": "Locate the yellow button, touch it once with the right index fingertip, then retreat.",
+      "mode": "simulation",
+      "plan_controls": {
+        "approach_scale": 1.0,
+        "motion_duration_scale": 1.0,
+        "observation_duration_ms": 250
+      },
+      "scenario": "shifted_base",
+      "seed": 11,
+      "task_id": "g1-yellow-button-contact-v1"
+    },
+    "run_id": "sim-0be3f41bac05afd1"
+  },
+  "round_two": {
+    "action_plan": [
+      {
+        "duration_ms": 500,
+        "right_arm_delta_rad": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "waypoint": "observe"
+      },
+      {
+        "duration_ms": 1080,
+        "right_arm_delta_rad": [
+          0.034,
+          -0.0935,
+          0.068,
+          -0.136,
+          0.0255,
+          0.085,
+          -0.017
+        ],
+        "waypoint": "pre_contact"
+      },
+      {
+        "duration_ms": 504,
+        "right_arm_delta_rad": [
+          0.0085,
+          -0.0255,
+          0.017,
+          -0.034,
+          0.0,
+          0.017,
+          0.0
+        ],
+        "waypoint": "contact"
+      },
+      {
+        "duration_ms": 780,
+        "right_arm_delta_rad": [
+          -0.02,
+          0.08,
+          -0.06,
+          0.11,
+          -0.02,
+          -0.07,
+          0.01
+        ],
+        "waypoint": "retreat"
+      }
+    ],
+    "decision": "accept",
+    "metrics": {
+      "minimum_clearance_mm": 40.87,
+      "peak_joint_velocity_ratio": 0.466,
+      "predicted_contact_error_mm": 2.99,
+      "retreat_distance_mm": 90.41,
+      "target_localization_confidence": 0.958
+    },
+    "plan_id": "yellow_button_round_2",
+    "request": {
+      "guardian_present": true,
+      "initial_state": {
+        "base_x_m": 0.18,
+        "base_y_m": -0.08,
+        "base_yaw_deg": 12.0
+      },
+      "instruction": "Locate the yellow button, touch it once with the right index fingertip, then retreat.",
+      "mode": "simulation",
+      "plan_controls": {
+        "approach_scale": 0.85,
+        "motion_duration_scale": 1.2,
+        "observation_duration_ms": 500
+      },
+      "scenario": "shifted_base",
+      "seed": 11,
+      "task_id": "g1-yellow-button-contact-v1"
+    },
+    "run_id": "sim-a390754c41873cb3"
+  },
+  "round_two_domain_all_candidates_guaranteed_to_pass": false,
+  "scientific_question": "在固定基座位姿扰动、任务和保护边界下，基于第一轮结果调整观察时长、接近幅度和动作时标，能否使黄色按钮任务的软件准入指标全部达标？"
+}

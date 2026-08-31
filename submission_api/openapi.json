@@ -15,6 +15,37 @@
     "/v1/capabilities": {
       "get": {"summary": "Discover tasks, modes and claim boundaries", "responses": {"200": {"description": "Capabilities"}}}
     },
+    "/v1/qwen/evidence": {
+      "get": {
+        "summary": "Read the retained Qwen two-round feedback-cycle summary",
+        "responses": {
+          "200": {"description": "Redacted Qwen provenance and deterministic contract-simulation outcomes", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/QwenCycleSummary"}}}},
+          "404": {"description": "The retained case artifact has not been generated"}
+        }
+      }
+    },
+    "/v1/qwen/replay": {
+      "post": {
+        "summary": "Replay the retained plans in the deterministic evaluator without calling Qwen",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/QwenReplayRequest"},
+              "examples": {
+                "both_rounds": {"value": {}},
+                "round_two_only": {"value": {"round": 2}}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Manifest-verified deterministic replay; qwen_called and physical_execution are false", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/QwenReplayResult"}}}},
+          "404": {"description": "The retained case artifact has not been generated"},
+          "422": {"description": "Unsupported round selection"}
+        }
+      }
+    },
     "/v1/invocations": {
       "post": {
         "summary": "Run one formal single-attempt invocation",
@@ -50,6 +81,7 @@
           "scenario": {"type": "string", "enum": ["nominal", "shifted_base", "target_occluded", "guardian_absent"], "default": "nominal"},
           "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647, "default": 7},
           "guardian_present": {"type": "boolean"},
+          "plan_controls": {"$ref": "#/components/schemas/PlanControls"},
           "initial_state": {
             "type": "object",
             "properties": {
@@ -70,6 +102,107 @@
           "trace": {"type": "array", "items": {"type": "object"}},
           "evaluation": {"type": "object"},
           "evidence_digest": {"type": "string"}
+        }
+      },
+      "PlanControls": {
+        "type": "object",
+        "required": ["observation_duration_ms", "approach_scale", "motion_duration_scale"],
+        "properties": {
+          "observation_duration_ms": {"type": "integer", "minimum": 200, "maximum": 800},
+          "approach_scale": {"type": "number", "minimum": 0.7, "maximum": 1.1},
+          "motion_duration_scale": {"type": "number", "minimum": 0.8, "maximum": 1.5}
+        }
+      },
+      "QwenPlanControls": {
+        "type": "object",
+        "required": ["observation_duration_ms", "approach_scale", "motion_duration_scale"],
+        "properties": {
+          "observation_duration_ms": {"type": "integer", "minimum": 250, "maximum": 650},
+          "approach_scale": {"type": "number", "minimum": 0.8, "maximum": 1.0},
+          "motion_duration_scale": {"type": "number", "minimum": 1.0, "maximum": 1.3}
+        }
+      },
+      "QwenInvocationRequest": {
+        "allOf": [
+          {"$ref": "#/components/schemas/InvocationRequest"},
+          {
+            "type": "object",
+            "properties": {
+              "initial_state": {
+                "type": "object",
+                "properties": {
+                  "base_x_m": {"type": "number", "const": 0.18},
+                  "base_y_m": {"type": "number", "const": -0.08},
+                  "base_yaw_deg": {"type": "number", "const": 12}
+                }
+              },
+              "plan_controls": {"$ref": "#/components/schemas/QwenPlanControls"}
+            }
+          }
+        ]
+      },
+      "QwenCycleRound": {
+        "type": "object",
+        "required": ["plan_id", "run_id", "decision", "request", "metrics", "action_plan"],
+        "properties": {
+          "plan_id": {"type": "string"},
+          "run_id": {"type": "string"},
+          "decision": {"type": "string", "enum": ["accept", "adjust"]},
+          "request": {"$ref": "#/components/schemas/QwenInvocationRequest"},
+          "metrics": {"type": "object", "additionalProperties": {"type": "number"}},
+          "action_plan": {"type": "array", "items": {"type": "object"}}
+        }
+      },
+      "QwenCycleSummary": {
+        "type": "object",
+        "required": ["cycle_id", "provider", "model", "claim_boundary", "round_one", "round_two", "qwen_request_ids", "credential_recorded", "physical_execution", "action_plan_changed"],
+        "properties": {
+          "cycle_id": {"type": "string"},
+          "provider": {"type": "string"},
+          "model": {"type": "string", "const": "qwen3-max"},
+          "claim_boundary": {"type": "string", "const": "deterministic_contract_simulation_only"},
+          "round_one": {"$ref": "#/components/schemas/QwenCycleRound"},
+          "round_two": {"$ref": "#/components/schemas/QwenCycleRound"},
+          "qwen_request_ids": {"type": "array", "items": {"type": "string"}},
+          "qwen_total_tokens": {"type": "integer"},
+          "credential_recorded": {"type": "boolean", "const": false},
+          "physical_execution": {"type": "boolean", "const": false},
+          "action_plan_changed": {"type": "boolean"},
+          "round_two_domain_all_candidates_guaranteed_to_pass": {"type": "boolean", "const": false}
+        }
+      },
+      "QwenReplayRequest": {
+        "type": "object",
+        "properties": {
+          "round": {"oneOf": [{"type": "string", "const": "all"}, {"type": "integer", "enum": [1, 2]}], "default": "all"}
+        },
+        "additionalProperties": false
+      },
+      "QwenReplayRound": {
+        "type": "object",
+        "required": ["round", "plan_id", "run_id", "decision", "plan_controls", "metrics", "action_plan", "evidence_digest"],
+        "properties": {
+          "round": {"type": "integer", "enum": [1, 2]},
+          "plan_id": {"type": "string"},
+          "run_id": {"type": "string"},
+          "decision": {"type": "string", "enum": ["accept", "adjust"]},
+          "plan_controls": {"$ref": "#/components/schemas/QwenPlanControls"},
+          "metrics": {"type": "object", "additionalProperties": {"type": "number"}},
+          "action_plan": {"type": "array", "items": {"type": "object"}},
+          "evidence_digest": {"type": "string"}
+        }
+      },
+      "QwenReplayResult": {
+        "type": "object",
+        "required": ["cycle_id", "claim_boundary", "replay_kind", "qwen_called", "physical_execution", "manifest_verified", "rounds"],
+        "properties": {
+          "cycle_id": {"type": "string"},
+          "claim_boundary": {"type": "string", "const": "deterministic_contract_simulation_only"},
+          "replay_kind": {"type": "string", "const": "deterministic_contract_simulation"},
+          "qwen_called": {"type": "boolean", "const": false},
+          "physical_execution": {"type": "boolean", "const": false},
+          "manifest_verified": {"type": "boolean", "const": true},
+          "rounds": {"type": "array", "items": {"$ref": "#/components/schemas/QwenReplayRound"}, "minItems": 1, "maxItems": 2}
         }
       }
     }

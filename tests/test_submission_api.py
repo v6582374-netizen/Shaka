@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import shutil
+import tempfile
 import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from submission_api.core import ApiProblem, build_capabilities, run_invocation
-from submission_api.server import SubmissionHandler, ThreadingHTTPServer
+from submission_api.server import SubmissionHandler, ThreadingHTTPServer, verify_qwen_manifest
 
 
 class SubmissionCoreTest(unittest.TestCase):
@@ -92,8 +95,50 @@ class SubmissionHttpE2ETest(unittest.TestCase):
         with urlopen(self.base + "/openapi.json", timeout=3) as contract:
             openapi = json.loads(contract.read())
         self.assertIn("Shaka Test Bench", html)
+        self.assertIn("读取已留存案例", html)
+        self.assertIn("重放两轮计划", html)
         self.assertEqual(openapi["openapi"], "3.1.0")
         self.assertIn("/v1/invocations", openapi["paths"])
+        self.assertIn("/v1/qwen/evidence", openapi["paths"])
+        self.assertIn("/v1/qwen/replay", openapi["paths"])
+        self.assertEqual(openapi["components"]["schemas"]["PlanControls"]["properties"]["observation_duration_ms"]["minimum"], 200)
+        self.assertEqual(openapi["components"]["schemas"]["QwenPlanControls"]["properties"]["observation_duration_ms"]["minimum"], 250)
+
+    def test_qwen_feedback_evidence_is_served_without_credentials(self) -> None:
+        status, evidence = self.read_json("/v1/qwen/evidence")
+        self.assertEqual(status, 200)
+        self.assertEqual(evidence["model"], "qwen3-max")
+        self.assertEqual(evidence["round_one"]["decision"], "adjust")
+        self.assertEqual(evidence["round_two"]["decision"], "accept")
+        self.assertFalse(evidence["credential_recorded"])
+        self.assertNotIn("api_key", json.dumps(evidence).lower())
+
+    def test_retained_qwen_cycle_can_be_replayed_without_calling_qwen(self) -> None:
+        status, replay = self.read_json("/v1/qwen/replay", {})
+        self.assertEqual(status, 200)
+        self.assertEqual([item["decision"] for item in replay["rounds"]], ["adjust", "accept"])
+        self.assertFalse(replay["qwen_called"])
+        self.assertFalse(replay["physical_execution"])
+        self.assertTrue(replay["manifest_verified"])
+        self.assertEqual(replay["rounds"][0]["plan_controls"]["observation_duration_ms"], 250)
+        self.assertEqual(replay["rounds"][1]["plan_controls"]["observation_duration_ms"], 500)
+
+    def test_qwen_replay_rejects_an_unknown_round(self) -> None:
+        status, body = self.read_json("/v1/qwen/replay", {"round": 3})
+        self.assertEqual(status, 422)
+        self.assertEqual(body["error"]["code"], "unsupported_round")
+
+    def test_qwen_manifest_verification_rejects_tampering(self) -> None:
+        source = Path(__file__).resolve().parents[1] / "artifacts" / "qwen-feedback-cycle"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            evidence = Path(temporary_directory) / "evidence"
+            shutil.copytree(source, evidence)
+            self.assertEqual(verify_qwen_manifest(evidence)["schema_version"], 1)
+            path = evidence / "cycle-summary.json"
+            path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+            with self.assertRaises(ApiProblem) as raised:
+                verify_qwen_manifest(evidence)
+            self.assertEqual(raised.exception.code, "evidence_integrity_failed")
 
 
 if __name__ == "__main__":

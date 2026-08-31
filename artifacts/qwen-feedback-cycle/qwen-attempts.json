@@ -1,0 +1,215 @@
+[
+  {
+    "accepted": true,
+    "attempt": 1,
+    "candidate": {
+      "changes_from_previous": [],
+      "evidence_status": "deterministic_contract_simulation_only",
+      "expected_observations": [
+        "localization_confidence >= 0.95",
+        "predicted_contact_error_mm <= 3.0",
+        "peak_joint_velocity_ratio <= 0.6",
+        "clearance_mm >= 40.0"
+      ],
+      "feedback_evidence": [],
+      "plan_id": "yellow_button_round_1",
+      "rationale": "本实验采用确定性契约仿真，在已知基座位姿扰动下执行黄色按钮按压任务。首轮使用默认控制参数建立性能基线，用于后续迭代优化。所有评估依据预设阈值自动判定，不依赖物理硬件或非确定性模型。",
+      "request": {
+        "guardian_present": true,
+        "initial_state": {
+          "base_x_m": 0.18,
+          "base_y_m": -0.08,
+          "base_yaw_deg": 12
+        },
+        "mode": "simulation",
+        "plan_controls": {
+          "approach_scale": 1.0,
+          "motion_duration_scale": 1.0,
+          "observation_duration_ms": 250
+        },
+        "scenario": "shifted_base",
+        "seed": 11
+      },
+      "round": 1,
+      "scientific_question": "在固定基座位姿扰动、任务和保护边界下，基于第一轮结果调整观察时长、接近幅度和动作时标，能否使黄色按钮任务的软件准入指标全部达标？",
+      "stop_conditions": [
+        "any safety_guardian_intervention",
+        "simulation_runtime_exceeds_10s",
+        "motion_execution_aborted"
+      ],
+      "success_criteria": {
+        "max_peak_joint_velocity_ratio": 0.6,
+        "max_predicted_contact_error_mm": 3.0,
+        "min_clearance_mm": 40.0,
+        "min_localization_confidence": 0.95
+      },
+      "working_hypothesis": "第一轮基线动作计划可能无法满足全部阈值，结果反馈可指导第二轮动作计划控制量调整。"
+    },
+    "receipt": {
+      "created": 1788158432,
+      "credential_recorded": false,
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "model_requested": "qwen3-max",
+      "model_returned": "qwen3-max",
+      "prompt_sha256": "2cfa1a976bd818e85262e4559190c28851b05ccce5ca9b9284a72a895e511ef8",
+      "provider": "Alibaba Cloud Model Studio (Bailian/DashScope)",
+      "recorded_at": "2026-08-31T06:40:43.100210Z",
+      "request_id": "chatcmpl-c7dd766d-e698-9239-b713-423b7d26f2cb",
+      "response_sha256": "69de3a3b455a6826cbd401e891834097771b567de691890c20cb5b44b74658c5",
+      "usage": {
+        "completion_tokens": 473,
+        "prompt_tokens": 614,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 1087
+      }
+    },
+    "round": 1
+  },
+  {
+    "accepted": true,
+    "attempt": 1,
+    "candidate": {
+      "changes_from_previous": [
+        "observation_duration_ms increased from 250 to 500 to improve localization confidence",
+        "approach_scale reduced from 1.0 to 0.85 to decrease predicted contact error",
+        "motion_duration_scale increased from 1.0 to 1.2 to reduce peak joint velocity ratio"
+      ],
+      "evidence_status": "deterministic_contract_simulation_only",
+      "expected_observations": [
+        "localization_confidence >= 0.95",
+        "predicted_contact_error_mm <= 3.0",
+        "peak_joint_velocity_ratio <= 0.6",
+        "clearance_mm >= 40.0"
+      ],
+      "feedback_evidence": [
+        {
+          "changed_control": "observation_duration_ms",
+          "criterion_value": 0.95,
+          "failed_check": "localization_confidence",
+          "from_value": 250,
+          "observed_value": 0.943,
+          "to_value": 500
+        },
+        {
+          "changed_control": "approach_scale",
+          "criterion_value": 3.0,
+          "failed_check": "predicted_contact_error",
+          "from_value": 1.0,
+          "observed_value": 3.19,
+          "to_value": 0.85
+        },
+        {
+          "changed_control": "motion_duration_scale",
+          "criterion_value": 0.6,
+          "failed_check": "peak_joint_velocity",
+          "from_value": 1.0,
+          "observed_value": 0.658,
+          "to_value": 1.2
+        }
+      ],
+      "plan_id": "yellow_button_round_2",
+      "rationale": "第一轮中 localization_confidence (0.943 < 0.95)、predicted_contact_error_mm (3.19 > 3.0) 和 peak_joint_velocity_ratio (0.658 > 0.6) 均未达标。为每个失败项保留明确安全余量：将 observation_duration_ms 提高至允许域中部偏上以增强感知稳定性；approach_scale 降至允许域下部以显著降低接触不确定性；motion_duration_scale 提升至允许域上部以充分抑制运动激进性。所有调整均在预设控制量允许范围内，且基座位姿严格保持不变。",
+      "request": {
+        "guardian_present": true,
+        "initial_state": {
+          "base_x_m": 0.18,
+          "base_y_m": -0.08,
+          "base_yaw_deg": 12
+        },
+        "mode": "simulation",
+        "plan_controls": {
+          "approach_scale": 0.85,
+          "motion_duration_scale": 1.2,
+          "observation_duration_ms": 500
+        },
+        "scenario": "shifted_base",
+        "seed": 11
+      },
+      "round": 2,
+      "scientific_question": "在固定基座位姿扰动、任务和保护边界下，基于第一轮结果调整观察时长、接近幅度和动作时标，能否使黄色按钮任务的软件准入指标全部达标？",
+      "stop_conditions": [
+        "any safety_guardian_intervention",
+        "simulation_runtime_exceeds_10s",
+        "motion_execution_aborted"
+      ],
+      "success_criteria": {
+        "max_peak_joint_velocity_ratio": 0.6,
+        "max_predicted_contact_error_mm": 3.0,
+        "min_clearance_mm": 40.0,
+        "min_localization_confidence": 0.95
+      },
+      "working_hypothesis": "延长观察时长可提升定位置信度，减小接近幅度可降低接触误差，延长动作时标可抑制关节速度峰值；三者协同调整有望使所有指标同时满足阈值要求。"
+    },
+    "receipt": {
+      "created": 1788158443,
+      "credential_recorded": false,
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "model_requested": "qwen3-max",
+      "model_returned": "qwen3-max",
+      "prompt_sha256": "043f1a1609f9c56704a79fab0fd4ca6bea5fbaa3c2c44469197bccad739bdea3",
+      "provider": "Alibaba Cloud Model Studio (Bailian/DashScope)",
+      "recorded_at": "2026-08-31T06:41:01.394201Z",
+      "request_id": "chatcmpl-00e923b3-6b35-970b-97bb-7dd390696bc9",
+      "response_sha256": "cfb8a2238af8f69a543566ccc8c83bcb5e3ed3e9b48e211f5c30a5789f90ab19",
+      "usage": {
+        "completion_tokens": 848,
+        "prompt_tokens": 1555,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 2403
+      }
+    },
+    "round": 2,
+    "verified_feedback_mapping": {
+      "changed_controls": {
+        "approach_scale": {
+          "round_one": 1.0,
+          "round_two": 0.85
+        },
+        "motion_duration_scale": {
+          "round_one": 1.0,
+          "round_two": 1.2
+        },
+        "observation_duration_ms": {
+          "round_one": 250,
+          "round_two": 500
+        }
+      },
+      "failed_checks": [
+        "localization_confidence",
+        "peak_joint_velocity",
+        "predicted_contact_error"
+      ],
+      "verified_by_deterministic_program": true,
+      "verified_feedback_evidence": [
+        {
+          "changed_control": "observation_duration_ms",
+          "criterion_value": 0.95,
+          "failed_check": "localization_confidence",
+          "from_value": 250,
+          "observed_value": 0.943,
+          "to_value": 500
+        },
+        {
+          "changed_control": "approach_scale",
+          "criterion_value": 3.0,
+          "failed_check": "predicted_contact_error",
+          "from_value": 1.0,
+          "observed_value": 3.19,
+          "to_value": 0.85
+        },
+        {
+          "changed_control": "motion_duration_scale",
+          "criterion_value": 0.6,
+          "failed_check": "peak_joint_velocity",
+          "from_value": 1.0,
+          "observed_value": 0.658,
+          "to_value": 1.2
+        }
+      ]
+    }
+  }
+]

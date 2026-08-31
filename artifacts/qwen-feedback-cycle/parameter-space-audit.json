@@ -1,0 +1,118 @@
+{
+  "all_candidates_guaranteed_to_pass": false,
+  "claim_boundary": "deterministic_contract_simulation_only",
+  "decision_counts": {
+    "accept": 15,
+    "adjust": 30
+  },
+  "examples": {
+    "accept": [
+      {
+        "metrics": {
+          "minimum_clearance_mm": 41.07,
+          "peak_joint_velocity_ratio": 0.526,
+          "predicted_contact_error_mm": 2.98,
+          "retreat_distance_mm": 90.41,
+          "target_localization_confidence": 0.955
+        },
+        "plan_controls": {
+          "approach_scale": 0.8,
+          "motion_duration_scale": 1.0,
+          "observation_duration_ms": 450
+        }
+      },
+      {
+        "metrics": {
+          "minimum_clearance_mm": 41.07,
+          "peak_joint_velocity_ratio": 0.458,
+          "predicted_contact_error_mm": 2.98,
+          "retreat_distance_mm": 90.41,
+          "target_localization_confidence": 0.955
+        },
+        "plan_controls": {
+          "approach_scale": 0.8,
+          "motion_duration_scale": 1.15,
+          "observation_duration_ms": 450
+        }
+      },
+      {
+        "metrics": {
+          "minimum_clearance_mm": 41.07,
+          "peak_joint_velocity_ratio": 0.405,
+          "predicted_contact_error_mm": 2.98,
+          "retreat_distance_mm": 90.41,
+          "target_localization_confidence": 0.955
+        },
+        "plan_controls": {
+          "approach_scale": 0.8,
+          "motion_duration_scale": 1.3,
+          "observation_duration_ms": 450
+        }
+      }
+    ],
+    "adjust": [
+      {
+        "metrics": {
+          "minimum_clearance_mm": 41.07,
+          "peak_joint_velocity_ratio": 0.526,
+          "predicted_contact_error_mm": 3.07,
+          "retreat_distance_mm": 90.41,
+          "target_localization_confidence": 0.943
+        },
+        "plan_controls": {
+          "approach_scale": 0.8,
+          "motion_duration_scale": 1.0,
+          "observation_duration_ms": 250
+        }
+      },
+      {
+        "metrics": {
+          "minimum_clearance_mm": 41.07,
+          "peak_joint_velocity_ratio": 0.458,
+          "predicted_contact_error_mm": 3.07,
+          "retreat_distance_mm": 90.41,
+          "target_localization_confidence": 0.943
+        },
+        "plan_controls": {
+          "approach_scale": 0.8,
+          "motion_duration_scale": 1.15,
+          "observation_duration_ms": 250
+        }
+      },
+      {
+        "metrics": {
+          "minimum_clearance_mm": 41.07,
+          "peak_joint_velocity_ratio": 0.405,
+          "predicted_contact_error_mm": 3.07,
+          "retreat_distance_mm": 90.41,
+          "target_localization_confidence": 0.943
+        },
+        "plan_controls": {
+          "approach_scale": 0.8,
+          "motion_duration_scale": 1.3,
+          "observation_duration_ms": 250
+        }
+      }
+    ]
+  },
+  "grid": {
+    "approach_scale": [
+      0.8,
+      0.9,
+      1.0
+    ],
+    "candidate_count": 45,
+    "motion_duration_scale": [
+      1.0,
+      1.15,
+      1.3
+    ],
+    "observation_duration_ms": [
+      250,
+      350,
+      450,
+      550,
+      650
+    ]
+  }
+}

@@ -18,6 +18,17 @@ python3 -m submission_api.server --host 127.0.0.1 --port 8787
 curl -sS http://127.0.0.1:8787/v1/health
 ```
 
+读取或重放已留存的 Qwen 两轮案例：
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/qwen/evidence
+curl -sS http://127.0.0.1:8787/v1/qwen/replay \
+  -H 'Content-Type: application/json' -d '{}'
+python3 scripts/verify_qwen_feedback_cycle.py
+```
+
+最后一条命令不启动服务、不联网、不写文件。
+
 发起一次调用：
 
 ```bash

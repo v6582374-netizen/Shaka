@@ -1,0 +1,43 @@
+{
+  "changes_from_previous": [],
+  "evidence_status": "deterministic_contract_simulation_only",
+  "expected_observations": [
+    "localization_confidence >= 0.95",
+    "predicted_contact_error_mm <= 3.0",
+    "peak_joint_velocity_ratio <= 0.6",
+    "clearance_mm >= 40.0"
+  ],
+  "feedback_evidence": [],
+  "plan_id": "yellow_button_round_1",
+  "rationale": "本实验采用确定性契约仿真，在已知基座位姿扰动下执行黄色按钮按压任务。首轮使用默认控制参数建立性能基线，用于后续迭代优化。所有评估依据预设阈值自动判定，不依赖物理硬件或非确定性模型。",
+  "request": {
+    "guardian_present": true,
+    "initial_state": {
+      "base_x_m": 0.18,
+      "base_y_m": -0.08,
+      "base_yaw_deg": 12
+    },
+    "mode": "simulation",
+    "plan_controls": {
+      "approach_scale": 1.0,
+      "motion_duration_scale": 1.0,
+      "observation_duration_ms": 250
+    },
+    "scenario": "shifted_base",
+    "seed": 11
+  },
+  "round": 1,
+  "scientific_question": "在固定基座位姿扰动、任务和保护边界下，基于第一轮结果调整观察时长、接近幅度和动作时标，能否使黄色按钮任务的软件准入指标全部达标？",
+  "stop_conditions": [
+    "any safety_guardian_intervention",
+    "simulation_runtime_exceeds_10s",
+    "motion_execution_aborted"
+  ],
+  "success_criteria": {
+    "max_peak_joint_velocity_ratio": 0.6,
+    "max_predicted_contact_error_mm": 3.0,
+    "min_clearance_mm": 40.0,
+    "min_localization_confidence": 0.95
+  },
+  "working_hypothesis": "第一轮基线动作计划可能无法满足全部阈值，结果反馈可指导第二轮动作计划控制量调整。"
+}

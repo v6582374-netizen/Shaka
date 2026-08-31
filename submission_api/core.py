@@ -19,6 +19,11 @@ API_VERSION = "2026-08-31"
 TASK_ID = "g1-yellow-button-contact-v1"
 RESULT_STATES = ("succeeded", "failed", "indeterminate", "aborted", "abstained")
 SCENARIOS = ("nominal", "shifted_base", "target_occluded", "guardian_absent")
+DEFAULT_PLAN_CONTROLS = {
+    "observation_duration_ms": 250,
+    "approach_scale": 1.0,
+    "motion_duration_scale": 1.0,
+}
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,13 @@ def build_capabilities() -> dict[str, Any]:
             "source": "https://github.com/v6582374-netizen/Shaka",
             "openapi": "/openapi.json",
             "interactive_demo": "/",
+            "qwen_feedback_evidence": "/v1/qwen/evidence",
+        },
+        "experiment_planner": {
+            "provider": "Alibaba Cloud Model Studio (Bailian/DashScope)",
+            "model": "qwen3-max",
+            "role": "structured plan generation and evidence-linked adjustment",
+            "result_assignment": "deterministic program outside Qwen",
         },
     }
 
@@ -125,6 +137,23 @@ def normalize_request(payload: Any) -> dict[str, Any]:
     if not isinstance(initial, dict):
         raise ApiProblem(422, "invalid_request", "initial_state must be an object")
 
+    controls = payload.get("plan_controls", {})
+    if not isinstance(controls, dict):
+        raise ApiProblem(422, "invalid_request", "plan_controls must be an object")
+    observation_duration_ms = controls.get(
+        "observation_duration_ms", DEFAULT_PLAN_CONTROLS["observation_duration_ms"]
+    )
+    if (
+        isinstance(observation_duration_ms, bool)
+        or not isinstance(observation_duration_ms, int)
+        or not 200 <= observation_duration_ms <= 800
+    ):
+        raise ApiProblem(
+            422,
+            "invalid_request",
+            "plan_controls.observation_duration_ms must be an integer between 200 and 800",
+        )
+
     seed = payload.get("seed", 7)
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2_147_483_647:
         raise ApiProblem(422, "invalid_request", "seed must be an integer between 0 and 2147483647")
@@ -145,6 +174,21 @@ def normalize_request(payload: Any) -> dict[str, Any]:
             "base_y_m": _number(initial.get("base_y_m", 0.0), "initial_state.base_y_m", -0.35, 0.35),
             "base_yaw_deg": _number(initial.get("base_yaw_deg", 0.0), "initial_state.base_yaw_deg", -25.0, 25.0),
         },
+        "plan_controls": {
+            "observation_duration_ms": observation_duration_ms,
+            "approach_scale": _number(
+                controls.get("approach_scale", DEFAULT_PLAN_CONTROLS["approach_scale"]),
+                "plan_controls.approach_scale",
+                0.70,
+                1.10,
+            ),
+            "motion_duration_scale": _number(
+                controls.get("motion_duration_scale", DEFAULT_PLAN_CONTROLS["motion_duration_scale"]),
+                "plan_controls.motion_duration_scale",
+                0.80,
+                1.50,
+            ),
+        },
     }
 
 
@@ -156,14 +200,35 @@ def _nominal_metrics(request: dict[str, Any]) -> dict[str, float]:
     pose = request["initial_state"]
     displacement = math.hypot(pose["base_x_m"], pose["base_y_m"])
     yaw = abs(pose["base_yaw_deg"])
+    controls = request["plan_controls"]
+    observation_delta_ms = controls["observation_duration_ms"] - DEFAULT_PLAN_CONTROLS["observation_duration_ms"]
+    approach_scale = controls["approach_scale"]
+    motion_duration_scale = controls["motion_duration_scale"]
     variation = ((request["seed"] * 37) % 17) / 10_000
+    base_localization_confidence = 0.989 - displacement * 0.14 - yaw * 0.0015
+    base_contact_error_mm = 2.1 + displacement * 4.0 + yaw * 0.025 + variation
+    base_peak_velocity_ratio = 0.64 + displacement * 0.09
+    base_clearance_mm = 43.0 - displacement * 9.0 - yaw * 0.08
     return {
-        "target_localization_confidence": round(max(0.82, 0.989 - displacement * 0.14 - yaw * 0.0015), 3),
-        "predicted_contact_error_mm": round(2.1 + displacement * 4.0 + yaw * 0.025 + variation, 2),
-        "peak_joint_velocity_ratio": round(0.51 + displacement * 0.09, 3),
-        "minimum_clearance_mm": round(43.0 - displacement * 9.0 - yaw * 0.08, 2),
+        "target_localization_confidence": round(
+            max(0.82, base_localization_confidence + observation_delta_ms * 0.00006), 3
+        ),
+        "predicted_contact_error_mm": round(
+            base_contact_error_mm
+            - observation_delta_ms * 0.00045
+            - (1.0 - approach_scale) * 0.60,
+            2,
+        ),
+        "peak_joint_velocity_ratio": round(
+            base_peak_velocity_ratio * approach_scale / motion_duration_scale, 3
+        ),
+        "minimum_clearance_mm": round(base_clearance_mm + (1.0 - approach_scale) * 4.0, 2),
         "retreat_distance_mm": round(91.0 - displacement * 3.0, 2),
     }
+
+
+def _scaled(values: list[float], scale: float) -> list[float]:
+    return [round(value * scale, 4) for value in values]
 
 
 def run_invocation(payload: Any) -> dict[str, Any]:
@@ -199,9 +264,12 @@ def run_invocation(payload: Any) -> dict[str, Any]:
         action_plan = []
     else:
         result = "succeeded"
+        controls = request["plan_controls"]
+        approach_scale = controls["approach_scale"]
+        duration_scale = controls["motion_duration_scale"]
         trace.extend(
             [
-                _trace_entry(3, "plan", "passed", "intent localized to a guarded five-waypoint arm trajectory"),
+                _trace_entry(3, "plan", "passed", "intent localized to a guarded four-waypoint arm trajectory"),
                 _trace_entry(4, "hardware_protection", "passed", "joint-rate and workspace envelopes admitted the plan"),
                 _trace_entry(5, "execute_simulation", "passed", "one contact attempt and retreat completed in the deterministic simulator"),
                 _trace_entry(6, "independent_evaluate", "succeeded", "synthetic visual evidence contains fingertip contact followed by retreat"),
@@ -211,10 +279,30 @@ def run_invocation(payload: Any) -> dict[str, Any]:
         summary = "The deterministic contract simulator completed one guarded contact-and-retreat attempt."
         visual_facts = {"target_visible": True, "contact_observed": True, "retreat_observed": True}
         action_plan = [
-            {"waypoint": "observe", "duration_ms": 250, "right_arm_delta_rad": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
-            {"waypoint": "pre_contact", "duration_ms": 900, "right_arm_delta_rad": [0.04, -0.11, 0.08, -0.16, 0.03, 0.10, -0.02]},
-            {"waypoint": "contact", "duration_ms": 420, "right_arm_delta_rad": [0.01, -0.03, 0.02, -0.04, 0.00, 0.02, 0.00]},
-            {"waypoint": "retreat", "duration_ms": 650, "right_arm_delta_rad": [-0.02, 0.08, -0.06, 0.11, -0.02, -0.07, 0.01]},
+            {
+                "waypoint": "observe",
+                "duration_ms": controls["observation_duration_ms"],
+                "right_arm_delta_rad": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            },
+            {
+                "waypoint": "pre_contact",
+                "duration_ms": round(900 * duration_scale),
+                "right_arm_delta_rad": _scaled(
+                    [0.04, -0.11, 0.08, -0.16, 0.03, 0.10, -0.02], approach_scale
+                ),
+            },
+            {
+                "waypoint": "contact",
+                "duration_ms": round(420 * duration_scale),
+                "right_arm_delta_rad": _scaled(
+                    [0.01, -0.03, 0.02, -0.04, 0.00, 0.02, 0.00], approach_scale
+                ),
+            },
+            {
+                "waypoint": "retreat",
+                "duration_ms": round(650 * duration_scale),
+                "right_arm_delta_rad": [-0.02, 0.08, -0.06, 0.11, -0.02, -0.07, 0.01],
+            },
         ]
 
     response_core = {

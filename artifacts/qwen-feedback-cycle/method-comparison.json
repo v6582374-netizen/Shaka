@@ -1,0 +1,94 @@
+{
+  "claim_boundary": "deterministic_contract_simulation_only",
+  "comparison_type": "feedback_policy_ablation",
+  "fairness_note": "All policies share the same round-one evidence, fixed pose, adjustment budget, seed, executor, and evaluator. Their second-round action-plan controls are policy outputs, not identical inputs.",
+  "feedback_disabled": {
+    "decision": "adjust",
+    "metrics": {
+      "minimum_clearance_mm": 40.27,
+      "peak_joint_velocity_ratio": 0.658,
+      "predicted_contact_error_mm": 3.19,
+      "retreat_distance_mm": 90.41,
+      "target_localization_confidence": 0.943
+    },
+    "policy": "replay the round-one plan without using result feedback",
+    "request": {
+      "guardian_present": true,
+      "initial_state": {
+        "base_x_m": 0.18,
+        "base_y_m": -0.08,
+        "base_yaw_deg": 12.0
+      },
+      "instruction": "Locate the yellow button, touch it once with the right index fingertip, then retreat.",
+      "mode": "simulation",
+      "plan_controls": {
+        "approach_scale": 1.0,
+        "motion_duration_scale": 1.0,
+        "observation_duration_ms": 250
+      },
+      "scenario": "shifted_base",
+      "seed": 11,
+      "task_id": "g1-yellow-button-contact-v1"
+    }
+  },
+  "limitation": "The evaluator metrics are constructed contract fixtures, not sensor or physics measurements.",
+  "qwen_feedback_enabled": {
+    "decision": "accept",
+    "metrics": {
+      "minimum_clearance_mm": 40.87,
+      "peak_joint_velocity_ratio": 0.466,
+      "predicted_contact_error_mm": 2.99,
+      "retreat_distance_mm": 90.41,
+      "target_localization_confidence": 0.958
+    },
+    "policy": "give Qwen the round-one result and deterministic assessment, then validate its bounded adjustment",
+    "request": {
+      "guardian_present": true,
+      "initial_state": {
+        "base_x_m": 0.18,
+        "base_y_m": -0.08,
+        "base_yaw_deg": 12.0
+      },
+      "instruction": "Locate the yellow button, touch it once with the right index fingertip, then retreat.",
+      "mode": "simulation",
+      "plan_controls": {
+        "approach_scale": 0.85,
+        "motion_duration_scale": 1.2,
+        "observation_duration_ms": 500
+      },
+      "scenario": "shifted_base",
+      "seed": 11,
+      "task_id": "g1-yellow-button-contact-v1"
+    }
+  },
+  "rule_based_feedback": {
+    "decision": "adjust",
+    "metrics": {
+      "minimum_clearance_mm": 40.67,
+      "peak_joint_velocity_ratio": 0.538,
+      "predicted_contact_error_mm": 3.04,
+      "retreat_distance_mm": 90.41,
+      "target_localization_confidence": 0.955
+    },
+    "policy": "fixed conservative rule: +200 ms observation, 0.90 approach scale, 1.10 duration scale",
+    "request": {
+      "guardian_present": true,
+      "initial_state": {
+        "base_x_m": 0.18,
+        "base_y_m": -0.08,
+        "base_yaw_deg": 12.0
+      },
+      "instruction": "Locate the yellow button, touch it once with the right index fingertip, then retreat.",
+      "mode": "simulation",
+      "plan_controls": {
+        "approach_scale": 0.9,
+        "motion_duration_scale": 1.1,
+        "observation_duration_ms": 450
+      },
+      "scenario": "shifted_base",
+      "seed": 11,
+      "task_id": "g1-yellow-button-contact-v1"
+    }
+  },
+  "shared_round_one_evidence_digest": "fae04d000df997caa329b5faa1f728a9da9f4af177052d472f6f15bed1a49ad9"
+}

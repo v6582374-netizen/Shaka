@@ -22,6 +22,8 @@
     .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:9px; }
     button { width:100%; margin-top:18px; border:0; border-radius:14px; padding:14px; background:linear-gradient(135deg,var(--violet),#6850e7); color:white; font-weight:800; font-size:15px; cursor:pointer; box-shadow:0 10px 30px rgba(113,87,255,.3); }
     button:disabled { opacity:.55; cursor:wait; }
+    .button-row { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:10px; }
+    .button-row button { margin-top:0; background:#232033; border:1px solid #403a5a; box-shadow:none; }
     .result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
     .status { display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:7px 10px; font-size:12px; color:var(--muted); }
     pre { min-height:520px; max-height:700px; overflow:auto; margin:0; border-radius:14px; background:#0a0910; border:1px solid #262334; padding:18px; color:#d9d4ff; font:12.5px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
@@ -67,6 +69,10 @@
       <label for="seed">确定性种子</label>
       <input id="seed" type="number" min="0" value="7" />
       <button id="run" type="submit">运行一次完整闭环</button>
+      <div class="button-row">
+        <button id="loadEvidence" type="button">读取已留存案例</button>
+        <button id="replayEvidence" type="button">重放两轮计划</button>
+      </div>
     </form>
     <article class="card">
       <div class="result-head"><div><div class="eyebrow">Structured evidence</div><h2 style="margin:6px 0 0">调用结果</h2></div><span class="status" id="status">等待调用</span></div>
@@ -83,6 +89,14 @@
   const endpoint = document.querySelector('#endpoint');
   endpoint.value = location.port === '8787' ? location.origin : 'http://127.0.0.1:8787';
   const form = document.querySelector('#form');
+  const apiRoot = () => endpoint.value.replace(/\/$/,'');
+  const render = (data, statusText) => {
+    document.querySelector('#output').textContent = JSON.stringify(data,null,2);
+    document.querySelector('#taskResult').textContent = data.task_result || data.round_two?.decision || data.rounds?.map(item => item.decision).join(' → ') || data.error?.code || 'loaded';
+    document.querySelector('#physical').textContent = String(data.execution?.physical_execution ?? data.physical_execution ?? '—');
+    document.querySelector('#phases').textContent = data.trace?.length ?? data.rounds?.length ?? '—';
+    document.querySelector('#status').textContent = statusText;
+  };
   const scenario = document.querySelector('#scenario');
   scenario.addEventListener('change', () => {
     const shifted = scenario.value === 'shifted_base';
@@ -103,18 +117,28 @@
       initial_state:{base_x_m:Number(document.querySelector('#x').value),base_y_m:Number(document.querySelector('#y').value),base_yaw_deg:Number(document.querySelector('#yaw').value)}
     };
     try {
-      const response = await fetch(endpoint.value.replace(/\/$/,'') + '/v1/invocations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const response = await fetch(apiRoot() + '/v1/invocations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const data = await response.json();
-      document.querySelector('#output').textContent = JSON.stringify(data,null,2);
-      document.querySelector('#taskResult').textContent = data.task_result || data.error?.code || 'error';
-      document.querySelector('#physical').textContent = String(data.execution?.physical_execution ?? '—');
-      document.querySelector('#phases').textContent = data.trace?.length ?? '—';
-      status.textContent = response.ok ? 'HTTP 200 · 完成' : `HTTP ${response.status}`;
+      render(data, response.ok ? 'HTTP 200 · 完成' : `HTTP ${response.status}`);
     } catch (error) {
       document.querySelector('#output').textContent = `无法连接 API：${error.message}\n\n启动命令：\npython3 -m submission_api.server --host 127.0.0.1 --port 8787`;
       status.textContent = '连接失败';
     } finally { button.disabled = false; }
   });
+  const evidenceAction = async (button, path, options, runningText) => {
+    button.disabled = true;
+    document.querySelector('#status').textContent = runningText;
+    try {
+      const response = await fetch(apiRoot() + path, options);
+      const data = await response.json();
+      render(data, response.ok ? `HTTP 200 · ${path.endsWith('replay') ? '重放完成' : '案例已读取'}` : `HTTP ${response.status}`);
+    } catch (error) {
+      document.querySelector('#output').textContent = `无法连接 API：${error.message}\n\nGitHub Pages 只提供静态界面；请配置本地 API 或 Codespaces 转发地址。`;
+      document.querySelector('#status').textContent = '连接失败';
+    } finally { button.disabled = false; }
+  };
+  document.querySelector('#loadEvidence').addEventListener('click', event => evidenceAction(event.currentTarget, '/v1/qwen/evidence', {}, '读取中…'));
+  document.querySelector('#replayEvidence').addEventListener('click', event => evidenceAction(event.currentTarget, '/v1/qwen/replay', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}, '重放中…'));
 </script>
 </body>
 </html>

@@ -1,0 +1,48 @@
+{
+  "claim_boundary": "deterministic_contract_simulation_only",
+  "cycle_id": "qwen-cycle-0be3f41b-ff691f9e",
+  "disclosed_from": "captured CLI stdout before the primary evidence directory was replaced",
+  "full_bundle_retained": false,
+  "generated_at": "2026-08-31T06:35:59.021686Z",
+  "limitation": "The original per-file bundle and receipt hashes were overwritten before failed-cycle retention was implemented; only the captured summary fields below are disclosed.",
+  "physical_execution": false,
+  "primary_cycle_selected_after_prompt_revision": true,
+  "prompt_revision": "Clarified that no objective rewards minimum change and that the planner should preserve margin without claiming guaranteed success.",
+  "qwen_request_ids": [
+    "chatcmpl-8dc0ba0f-2a5e-970a-9451-82775403253e",
+    "chatcmpl-e0716f98-4e69-962b-b60f-9908f9b4286e"
+  ],
+  "qwen_total_tokens": 3387,
+  "round_decisions": [
+    "adjust",
+    "adjust"
+  ],
+  "round_one": {
+    "metrics": {
+      "minimum_clearance_mm": 40.27,
+      "peak_joint_velocity_ratio": 0.658,
+      "predicted_contact_error_mm": 3.19,
+      "target_localization_confidence": 0.943
+    },
+    "plan_controls": {
+      "approach_scale": 1.0,
+      "motion_duration_scale": 1.0,
+      "observation_duration_ms": 250
+    },
+    "run_id": "sim-0be3f41bac05afd1"
+  },
+  "round_two": {
+    "metrics": {
+      "minimum_clearance_mm": 40.59,
+      "peak_joint_velocity_ratio": 0.526,
+      "predicted_contact_error_mm": 3.05,
+      "target_localization_confidence": 0.955
+    },
+    "plan_controls": {
+      "approach_scale": 0.92,
+      "motion_duration_scale": 1.15,
+      "observation_duration_ms": 450
+    },
+    "run_id": "sim-ff691f9e64a0f906"
+  }
+}

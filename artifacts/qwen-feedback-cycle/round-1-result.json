@@ -1,0 +1,154 @@
+{
+  "action_plan": [
+    {
+      "duration_ms": 250,
+      "right_arm_delta_rad": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "waypoint": "observe"
+    },
+    {
+      "duration_ms": 900,
+      "right_arm_delta_rad": [
+        0.04,
+        -0.11,
+        0.08,
+        -0.16,
+        0.03,
+        0.1,
+        -0.02
+      ],
+      "waypoint": "pre_contact"
+    },
+    {
+      "duration_ms": 420,
+      "right_arm_delta_rad": [
+        0.01,
+        -0.03,
+        0.02,
+        -0.04,
+        0.0,
+        0.02,
+        0.0
+      ],
+      "waypoint": "contact"
+    },
+    {
+      "duration_ms": 650,
+      "right_arm_delta_rad": [
+        -0.02,
+        0.08,
+        -0.06,
+        0.11,
+        -0.02,
+        -0.07,
+        0.01
+      ],
+      "waypoint": "retreat"
+    }
+  ],
+  "api_version": "2026-08-31",
+  "evaluation": {
+    "evaluator_id": "shaka-contract-evaluator-v1",
+    "evidence_level": "illustrative_simulation",
+    "human_audit_required_for_physical_claim": true,
+    "metrics": {
+      "minimum_clearance_mm": 40.27,
+      "peak_joint_velocity_ratio": 0.658,
+      "predicted_contact_error_mm": 3.19,
+      "retreat_distance_mm": 90.41,
+      "target_localization_confidence": 0.943
+    },
+    "visual_facts": {
+      "contact_observed": true,
+      "retreat_observed": true,
+      "target_visible": true
+    }
+  },
+  "evidence_digest": "fae04d000df997caa329b5faa1f728a9da9f4af177052d472f6f15bed1a49ad9",
+  "execution": {
+    "mode": "simulation",
+    "physical_execution": false,
+    "robot_required": false,
+    "scenario": "shifted_base",
+    "single_attempt": true,
+    "writes_to_robot": 0
+  },
+  "generated_at": "2026-08-31T06:40:43.100424Z",
+  "provenance": {
+    "claim_boundary": "This result proves API and lifecycle form only; it is not physical G1 evidence.",
+    "source": "https://github.com/v6582374-netizen/Shaka"
+  },
+  "request": {
+    "guardian_present": true,
+    "initial_state": {
+      "base_x_m": 0.18,
+      "base_y_m": -0.08,
+      "base_yaw_deg": 12.0
+    },
+    "instruction": "Locate the yellow button, touch it once with the right index fingertip, then retreat.",
+    "mode": "simulation",
+    "plan_controls": {
+      "approach_scale": 1.0,
+      "motion_duration_scale": 1.0,
+      "observation_duration_ms": 250
+    },
+    "scenario": "shifted_base",
+    "seed": 11,
+    "task_id": "g1-yellow-button-contact-v1"
+  },
+  "request_digest": "0be3f41bac05afd15460c24eb28fbf15dd28a087d982bcb3f4ce0f807eeb7d95",
+  "run_id": "sim-0be3f41bac05afd1",
+  "summary": "The deterministic contract simulator completed one guarded contact-and-retreat attempt.",
+  "task_result": "succeeded",
+  "trace": [
+    {
+      "detail": "single-attempt contract and standard start state accepted",
+      "outcome": "passed",
+      "phase": "ready_check",
+      "sequence": 1
+    },
+    {
+      "detail": "synthetic RGB-D and proprioceptive observation assembled",
+      "outcome": "passed",
+      "phase": "observe",
+      "sequence": 2
+    },
+    {
+      "detail": "intent localized to a guarded four-waypoint arm trajectory",
+      "outcome": "passed",
+      "phase": "plan",
+      "sequence": 3
+    },
+    {
+      "detail": "joint-rate and workspace envelopes admitted the plan",
+      "outcome": "passed",
+      "phase": "hardware_protection",
+      "sequence": 4
+    },
+    {
+      "detail": "one contact attempt and retreat completed in the deterministic simulator",
+      "outcome": "passed",
+      "phase": "execute_simulation",
+      "sequence": 5
+    },
+    {
+      "detail": "synthetic visual evidence contains fingertip contact followed by retreat",
+      "outcome": "succeeded",
+      "phase": "independent_evaluate",
+      "sequence": 6
+    },
+    {
+      "detail": "request, plan, trace, metrics, and verdict bound by digest",
+      "outcome": "passed",
+      "phase": "retain",
+      "sequence": 7
+    }
+  ]
+}

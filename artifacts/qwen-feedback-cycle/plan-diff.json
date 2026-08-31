@@ -1,0 +1,91 @@
+{
+  "action_plan_changed": true,
+  "action_plan_controls": {
+    "approach_scale": {
+      "round_one": 1.0,
+      "round_two": 0.85
+    },
+    "motion_duration_scale": {
+      "round_one": 1.0,
+      "round_two": 1.2
+    },
+    "observation_duration_ms": {
+      "round_one": 250,
+      "round_two": 500
+    }
+  },
+  "changed_waypoints": [
+    "observe",
+    "pre_contact",
+    "contact",
+    "retreat"
+  ],
+  "frozen_fields": [
+    "task_id",
+    "instruction",
+    "mode",
+    "scenario",
+    "seed",
+    "guardian_present",
+    "initial_state",
+    "success_criteria"
+  ],
+  "frozen_initial_state": {
+    "base_x_m": 0.18,
+    "base_y_m": -0.08,
+    "base_yaw_deg": 12.0
+  },
+  "qwen_explanation": [
+    "observation_duration_ms increased from 250 to 500 to improve localization confidence",
+    "approach_scale reduced from 1.0 to 0.85 to decrease predicted contact error",
+    "motion_duration_scale increased from 1.0 to 1.2 to reduce peak joint velocity ratio"
+  ],
+  "verified_feedback_mapping": {
+    "changed_controls": {
+      "approach_scale": {
+        "round_one": 1.0,
+        "round_two": 0.85
+      },
+      "motion_duration_scale": {
+        "round_one": 1.0,
+        "round_two": 1.2
+      },
+      "observation_duration_ms": {
+        "round_one": 250,
+        "round_two": 500
+      }
+    },
+    "failed_checks": [
+      "localization_confidence",
+      "peak_joint_velocity",
+      "predicted_contact_error"
+    ],
+    "verified_by_deterministic_program": true,
+    "verified_feedback_evidence": [
+      {
+        "changed_control": "observation_duration_ms",
+        "criterion_value": 0.95,
+        "failed_check": "localization_confidence",
+        "from_value": 250,
+        "observed_value": 0.943,
+        "to_value": 500
+      },
+      {
+        "changed_control": "approach_scale",
+        "criterion_value": 3.0,
+        "failed_check": "predicted_contact_error",
+        "from_value": 1.0,
+        "observed_value": 3.19,
+        "to_value": 0.85
+      },
+      {
+        "changed_control": "motion_duration_scale",
+        "criterion_value": 0.6,
+        "failed_check": "peak_joint_velocity",
+        "from_value": 1.0,
+        "observed_value": 0.658,
+        "to_value": 1.2
+      }
+    ]
+  }
+}

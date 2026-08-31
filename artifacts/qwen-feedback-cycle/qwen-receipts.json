@@ -1,0 +1,42 @@
+[
+  {
+    "created": 1788158432,
+    "credential_recorded": false,
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "model_requested": "qwen3-max",
+    "model_returned": "qwen3-max",
+    "prompt_sha256": "2cfa1a976bd818e85262e4559190c28851b05ccce5ca9b9284a72a895e511ef8",
+    "provider": "Alibaba Cloud Model Studio (Bailian/DashScope)",
+    "recorded_at": "2026-08-31T06:40:43.100210Z",
+    "request_id": "chatcmpl-c7dd766d-e698-9239-b713-423b7d26f2cb",
+    "response_sha256": "69de3a3b455a6826cbd401e891834097771b567de691890c20cb5b44b74658c5",
+    "usage": {
+      "completion_tokens": 473,
+      "prompt_tokens": 614,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 1087
+    }
+  },
+  {
+    "created": 1788158443,
+    "credential_recorded": false,
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "model_requested": "qwen3-max",
+    "model_returned": "qwen3-max",
+    "prompt_sha256": "043f1a1609f9c56704a79fab0fd4ca6bea5fbaa3c2c44469197bccad739bdea3",
+    "provider": "Alibaba Cloud Model Studio (Bailian/DashScope)",
+    "recorded_at": "2026-08-31T06:41:01.394201Z",
+    "request_id": "chatcmpl-00e923b3-6b35-970b-97bb-7dd390696bc9",
+    "response_sha256": "cfb8a2238af8f69a543566ccc8c83bcb5e3ed3e9b48e211f5c30a5789f90ab19",
+    "usage": {
+      "completion_tokens": 848,
+      "prompt_tokens": 1555,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 2403
+    }
+  }
+]

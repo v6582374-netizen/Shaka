@@ -3,6 +3,7 @@
 * [概览](README.md)
 * [5 分钟快速开始](quickstart.md)
 * [API 契约](api-reference.md)
+* [Qwen 两轮反馈案例](qwen-feedback-cycle.md)
 * [代表性测试案例](examples.md)
 * [系统架构与创新](architecture.md)
 * [证据边界与真机迁移](evidence-boundary.md)
