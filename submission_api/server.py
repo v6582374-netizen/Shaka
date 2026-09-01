@@ -17,9 +17,9 @@ from .qwen_planner import assess_result, validate_plan
 
 
 ROOT = Path(__file__).resolve().parent
-DOCS_ROOT = ROOT.parent / "docs" / "public-api"
 QWEN_EVIDENCE_ROOT = ROOT.parent / "artifacts" / "qwen-feedback-cycle"
 QWEN_EVIDENCE = QWEN_EVIDENCE_ROOT / "cycle-summary.json"
+INTERACTIVE_FRONTEND = "http://118.178.180.10"
 
 
 def verify_qwen_manifest(directory: Path = QWEN_EVIDENCE_ROOT) -> dict[str, Any]:
@@ -111,7 +111,14 @@ class SubmissionHandler(BaseHTTPRequestHandler):
         elif path == "/openapi.json":
             self._file(ROOT / "openapi.json", "application/json; charset=utf-8")
         elif path in {"/", "/index.html"}:
-            self._file(DOCS_ROOT / "demo.html", "text/html; charset=utf-8")
+            self._json(
+                HTTPStatus.OK,
+                {
+                    "service": "Shaka Submission API",
+                    "interactive_frontend": INTERACTIVE_FRONTEND,
+                    "openapi": "/openapi.json",
+                },
+            )
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": {"code": "not_found", "message": "route not found"}})
 

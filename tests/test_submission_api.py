@@ -89,14 +89,14 @@ class SubmissionHttpE2ETest(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertEqual(body["error"]["code"], "unsupported_scenario")
 
-    def test_showcase_page_and_openapi_are_served(self) -> None:
+    def test_api_root_and_openapi_are_served(self) -> None:
         with urlopen(self.base + "/", timeout=3) as page:
-            html = page.read().decode()
+            root = json.loads(page.read())
         with urlopen(self.base + "/openapi.json", timeout=3) as contract:
             openapi = json.loads(contract.read())
-        self.assertIn("Shaka · Evolution Observatory", html)
-        self.assertIn("真机链路已打通", html)
-        self.assertIn("API 手册", html)
+        self.assertEqual(root["service"], "Shaka Submission API")
+        self.assertEqual(root["interactive_frontend"], "http://118.178.180.10")
+        self.assertEqual(root["openapi"], "/openapi.json")
         self.assertEqual(openapi["openapi"], "3.1.0")
         self.assertIn("/v1/invocations", openapi["paths"])
         self.assertIn("/v1/qwen/evidence", openapi["paths"])
