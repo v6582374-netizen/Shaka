@@ -1,10 +1,8 @@
 # Shaka API 手册
 
-这里是 Shaka 的开发者文档，负责说明如何调用、验证和扩展系统。项目愿景、真机成果与自进化蓝图请先看[系统展示页](demo.html)；接口字段、错误语义、证据校验和实现细节以本手册为准。
+这里是 Shaka 的开发者文档，负责说明如何调用、验证和扩展系统；接口字段、错误语义、证据校验和实现细节以本手册为准。
 
 > 公共 API 的默认模式是确定性契约仿真。它用于验证接口、生命周期与证据结构，不代表一次 G1 物理执行。真实 G1 金丝雀及其安全中止证据在[证据边界](evidence-boundary.md)中单独说明。
-
-<a class="demo-link" href="demo.html">打开 Shaka Evolution Observatory →</a>
 
 ## 最短路径
 
@@ -42,6 +40,5 @@ curl -sS http://127.0.0.1:8787/v1/invocations \
 - [代表性测试案例](examples.md)
 - [系统架构与创新](architecture.md)
 - [证据边界与真机迁移](evidence-boundary.md)
-- [系统成果展示](demo.html)
 - [P1–P20 技术报告](paper/Shaka-Technical-Report.pdf)
 - [GitHub 源码](https://github.com/v6582374-netizen/Shaka)

@@ -6,5 +6,4 @@
 * [代表性测试案例](examples.md)
 * [系统架构与创新](architecture.md)
 * [证据边界与真机迁移](evidence-boundary.md)
-* [系统成果展示](demo.html)
 * [技术报告 PDF](paper/Shaka-Technical-Report.pdf)

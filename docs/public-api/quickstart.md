@@ -1,6 +1,6 @@
 # 5 分钟快速开始
 
-本页只处理 API 调用。若要先理解项目愿景与真机成果，请打开 [Shaka Evolution Observatory](demo.html)。
+本页只处理 API 调用，从启动服务到完成一次可验证请求。
 
 ## 1. 启动服务
 
